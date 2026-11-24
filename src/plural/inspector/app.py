@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Literal, TypeVar, cast
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 
+from plural.agents.models import ContextPolicy
 from plural.agents.tool_overrides import ToolOverride
 from plural.apps.base import App
 from plural.apps.definition import SecretReference
@@ -45,6 +46,58 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 
 def _tool(*, read_only: bool = True, timeout_seconds: float = 30) -> Callable[[_F], _F]:
     return cast("Callable[[_F], _F]", action(read_only=read_only, timeout_seconds=timeout_seconds))
+
+
+def _context_config(value: dict[str, Any] | None) -> dict[str, Any]:
+    """The ``harness_config`` of a context policy the Inspector proposed.
+
+    Raises:
+        ValueError: Saying what is wrong with the policy.
+    """
+    if value is None:
+        return {}
+    try:
+        policy = ContextPolicy.model_validate(value)
+    except ValidationError as exc:
+        raise ValueError(f"context isn't a context policy: {exc}") from exc
+    return {"context": policy.model_dump(mode="json")}
+
+
+def _tested(remedy: Remedy, forks: list[ForkTest], gates: Sequence[str]) -> Remedy:
+    """The remedy a confirmed Finding ships: one a fork tested and that beat its controls.
+
+    With no remedy given, it is the winning fork's.
+
+    Returns:
+        The remedy, with the given note.
+
+    Raises:
+        ValueError: When the remedy given isn't one a winning fork tested.
+    """
+    winners = [
+        item
+        for item in forks
+        if item.beat_controls
+        and item.remedy is not None
+        and (not gates or not item.gates or set(item.gates) & set(gates))
+    ]
+    if not winners:
+        return remedy
+    if remedy.empty:
+        assert winners[0].remedy is not None
+        return winners[0].remedy.model_copy(update={"note": remedy.note})
+    given = remedy.model_dump(mode="json", exclude={"note"})
+    for item in winners:
+        assert item.remedy is not None
+        if item.remedy.model_dump(mode="json", exclude={"note"}) == given:
+            return remedy
+    names = ", ".join(item.test_id for item in winners)
+    raise ValueError(
+        f"This remedy wasn't tested: {names} beat the controls with a different one, and a "
+        "confirmed Finding ships what its fork tested. Leave instructions, "
+        "tool_descriptions, model, and context out to record that fork's remedy, or fork "
+        "this one first and list it in tests."
+    )
 
 
 class InspectorState(State):
@@ -128,6 +181,7 @@ class InspectorApp(App[InspectorState]):
         return {
             **trial.overview(),
             "signals": [item.as_dict() for item in run_signals(trial)],
+            "context_compactions": trial.compactions,
             "known_patterns": _patterns(self._root),
             "fork_budget_usd": round(self.state.budget_usd - self.state.spent_usd, 4),
             "forks_allowed": ATTEMPTS[self.state.depth] > 0 and bool(os.environ.get(CREDENTIAL)),
@@ -277,14 +331,17 @@ class InspectorApp(App[InspectorState]):
         tool_descriptions: dict[str, str] | None = None,
         hide_tools: list[str] | None = None,
         model: str | None = None,
+        context: dict[str, Any] | None = None,
         change: str | None = None,
         payload: dict[str, Any] | None = None,
         gates: list[str] | None = None,
     ) -> dict[str, Any]:
         """Test a cause: continue the failed Trial after step with the Agent changed, beside
         controls that rerun it unchanged. Change the Agent with instructions (its whole new
-        text), tool_descriptions (tool name to new description), hide_tools, or model;
-        or change what it sees with a diagnostic change and payload. Step 0 starts over.
+        text), tool_descriptions (tool name to new description), hide_tools, model, or
+        context (its whole new context policy: strategy, max_tokens, keep_last_turns,
+        summary_instructions); or change what it sees with a diagnostic change and
+        payload. Step 0 starts over.
         gates names the failed gates this cause explains: each side is judged on those
         alone, so a fix for one of two failures shows its effect. Returns how often each
         side passed and the verdict. Costs money.
@@ -307,9 +364,11 @@ class InspectorApp(App[InspectorState]):
                 **{name: ToolOverride(hidden=True) for name in hide_tools or ()},
             },
             model=model,
+            harness_config=_context_config(context),
         )
         if remedy.empty and change is None:
             raise ValueError("Change the Agent or name a diagnostic change to test.")
+        self._general(remedy)
         if model is not None and self.state.fork_models and model not in self.state.fork_models:
             raise ValueError(
                 f"Forks may run {', '.join(self.state.fork_models)}, not {model}. Pick one of "
@@ -378,6 +437,7 @@ class InspectorApp(App[InspectorState]):
         instructions: str | None = None,
         tool_descriptions: dict[str, str] | None = None,
         model: str | None = None,
+        context: dict[str, Any] | None = None,
         note: str = "",
         gates: list[str] | None = None,
         more: bool = False,
@@ -388,11 +448,13 @@ class InspectorApp(App[InspectorState]):
         record; critical_step is where it went wrong (None when the Agent's work was right
         and the grading was wrong); tests names the forks (X1, ...) that tested it. For a
         cause the Agent can fix, give the remedy you would ship: instructions,
-        tool_descriptions, or model, and a note. A model Finding is refused unless tests
-        names a fork that changed only the model and beat its controls. Set more to true
-        when another cause
-        explains other failed gates and you will record it next; otherwise this ends the
-        episode, and every failed gate must be explained by then.
+        tool_descriptions, model, or context, and a note. When a fork in tests beat its
+        controls, the remedy is that fork's: leave them out to use it. A remedy ships to
+        every Task, so one that names this Task's own accounts, customers, or items is
+        refused: describe the kind of thing instead. A model Finding is refused unless
+        tests names a fork that changed only the model and beat its controls. Set more to
+        true when another cause explains other failed gates and you will record it next;
+        otherwise this ends the episode, and every failed gate must be explained by then.
         """
         if self.state.mode != "inspect":
             raise ValueError("This is a question; answer it with answer().")
@@ -439,10 +501,14 @@ class InspectorApp(App[InspectorState]):
                 for name, text in (tool_descriptions or {}).items()
             },
             model=model,
+            harness_config=_context_config(context),
             note=note,
         )
+        self._general(remedy)
         trial = self._trial()
         status = finding_status(forks, agent_cause=causes[cause].agent, gates=gates or ())
+        if status == "confirmed":
+            remedy = _tested(remedy, forks, gates or ())
         self.state.findings.append(
             {
                 "trial_id": trial.trial_id,
@@ -462,6 +528,23 @@ class InspectorApp(App[InspectorState]):
         )
         self.state.done = not more
         return f"Recorded: {cause}, {status}." + (" Record the next cause." if more else "")
+
+    def _general(self, remedy: Remedy) -> None:
+        """Refuse a remedy that names one Task's own accounts, customers, or items.
+
+        A remedy changes the Agent for every Task, so naming what only this Task holds
+        would fit the fix to this Trial rather than to the Agent's work.
+        """
+        trial = self._trial()
+        named = remedy.names(self._job.task_entities(trial))
+        if named:
+            raise ValueError(
+                f"The remedy names {', '.join(repr(item) for item in named[:5])}, which "
+                f"belong{'s' if len(named) == 1 else ''} to Task {trial.task.task_id} alone. "
+                "A remedy changes the Agent for every Task, so describe the kind of thing "
+                "(a customer, a supplier, an item) and how to recognize it, never one Task's "
+                "own."
+            )
 
     def _revealed(self) -> set[str]:
         """Gates that forks which beat their controls failed, beyond the ones they fixed."""

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from plural.agents import AgentBinding
+from plural.agents.models import without_context
 from plural.inspector.evidence import trial_passed
 from plural.inspector.findings import ForkTest, Remedy
 from plural.jobs import TrialResult
@@ -42,8 +43,11 @@ def remedy_agent(binding: AgentBinding, remedy: Remedy, label: str) -> AgentBind
         update["instructions"] = remedy.instructions
     if remedy.model is not None:
         update["model"] = remedy.model
-    if remedy.harness_config:
-        update["harness_config"] = {**agent.harness_config, **remedy.harness_config}
+    options, context = without_context(remedy.harness_config)
+    if options:
+        update["harness_config"] = {**agent.harness_config, **options}
+    if context is not None:
+        update["context"] = context
     changed = type(agent).model_validate({**agent.model_dump(), **update})
     return AgentBinding(agent=changed)
 

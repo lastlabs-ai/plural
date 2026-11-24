@@ -262,8 +262,11 @@ run that the hosted project does not hold yet, as a new numbered revision of any
 whose files changed; an input someone else changed in the hosted project since you
 last synced stops the push before anything is uploaded. `job record` records a local Job
 that already finished; it pins the
-revisions that Job ran, so push those first. Both produce the same hosted Job, so
-recording a Job again uploads only what the hosted Job does not hold yet. The
+revisions that Job ran, so push those first. Both produce the same hosted Job.
+Recording a Job again uploads what the hosted Job does not hold yet and republishes
+each Trial it already holds, so the hosted outcome, score, seats, and gates match the
+local Job as it is now; each republish is an event on the Trial. Only a Job its client
+ran can be republished: a Job the hosted platform ran keeps its outcome. The
 Environment's Runtime still decides where Trials execute, so a recorded run against a
 Daytona Environment runs remotely. See
 [Record runs and run in the cloud](../platform/runs.md).
@@ -1753,8 +1756,9 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  The hosted Job pins the pushed revisions the local Job ran, so push those
  first, or pass --push-pinned when your files changed since the run.
- Recording again, or recording a Job that ran with --record, uploads only
- what the hosted Job does not hold yet.
+ Recording again, or recording a Job that ran with --record, uploads what
+ the hosted Job does not hold yet and republishes each Trial it already
+ holds, so its outcome, score, seats, and gates match the local Job now.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    job_id      <str>  Finished local Job to record in the hosted project. [required]           │
@@ -2087,49 +2091,59 @@ This section is generated from the Typer application. Run `uv run python scripts
  are asked again.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ --task              -t      <str>               Task to run: NAME[@REF], where REF is a revision │
-│                                                 number (@3), a release version (@1.0.0), or a    │
-│                                                 content hash.                                    │
-│ --benchmark         -b      <str>               Benchmark to run: NAME[@REF], where REF is a     │
-│                                                 revision number (@3), a release version          │
-│                                                 (@1.0.0), or a content hash.                     │
-│ --model             -m      <str>               Catalog model id.                                │
-│ --harness                   <str>               Harness for --model. Default: native (Plural's   │
-│                                                 built-in tool loop).                             │
-│ --agent             -a      <str>               Saved Agent to run: NAME[@REF], where REF is a   │
-│                                                 revision number (@3), a release version          │
-│                                                 (@1.0.0), or a content hash.                     │
-│ --record                                        Run here, and record the Job in the hosted       │
-│                                                 project as it runs. Inputs the hosted project    │
-│                                                 lacks are pushed first.                          │
-│ --evaluation-track          <str>               Run a Benchmark under one of its evaluation      │
-│                                                 tracks, by id, so the results can be published.  │
-│                                                 Implies --record, and uses the track's attempts. │
-│ --attempts                  <int range> [x>=1]  Advanced: Trials per Task (default 1).           │
-│ --heldout                                       Run only the Benchmark's held-out Tasks. Each    │
-│                                                 such run is a peek, and is counted.              │
-│ --concurrency       -n      <str>               Trials to run at once: a number, or auto to size │
-│                                                 it from this machine, the runtime, and where the │
-│                                                 model runs.                                      │
-│                                                 [default: auto]                                  │
-│ --plural-version            <str>               Plural to install in Docker and remote           │
-│                                                 sandboxes: a version, or latest. Default: this   │
-│                                                 CLI's own code.                                  │
-│ --dry-run                                       Advanced: validate and show the plan without     │
-│                                                 running.                                         │
-│ --listen                    <str>               For an external Agent: HOST:PORT where this run  │
-│                                                 serves its episodes.                             │
-│                                                 [default: 127.0.0.1:0]                           │
-│ --public-url                <str>               For an external Agent: the https base URL it     │
-│                                                 reaches this run at, when that differs from      │
-│                                                 --listen, such as behind a proxy.                │
-│ --tls-cert                  <path>              For an external Agent: the certificate to serve  │
-│                                                 https with.                                      │
-│ --tls-key                   <path>              For an external Agent: the key of --tls-cert.    │
-│ --yes               -y                          Use an endpoint Agent's model without asking,    │
-│                                                 even one you have not accepted.                  │
-│ --json                                          Print machine-readable JSON.                     │
-│ --help                                          Show this message and exit.                      │
+│ --task              -t      <str>                 Task to run: NAME[@REF], where REF is a        │
+│                                                   revision number (@3), a release version        │
+│                                                   (@1.0.0), or a content hash.                   │
+│ --benchmark         -b      <str>                 Benchmark to run: NAME[@REF], where REF is a   │
+│                                                   revision number (@3), a release version        │
+│                                                   (@1.0.0), or a content hash.                   │
+│ --model             -m      <str>                 Catalog model id.                              │
+│ --harness                   <str>                 Harness for --model. Default: native (Plural's │
+│                                                   built-in tool loop).                           │
+│ --agent             -a      <str>                 Saved Agent to run: NAME[@REF], where REF is a │
+│                                                   revision number (@3), a release version        │
+│                                                   (@1.0.0), or a content hash.                   │
+│ --record                                          Run here, and record the Job in the hosted     │
+│                                                   project as it runs. Inputs the hosted project  │
+│                                                   lacks are pushed first.                        │
+│ --evaluation-track          <str>                 Run a Benchmark under one of its evaluation    │
+│                                                   tracks, by id, so the results can be           │
+│                                                   published. Implies --record, and uses the      │
+│                                                   track's attempts.                              │
+│ --attempts                  <int range> [x>=1]    Advanced: Trials per Task (default 1).         │
+│ --heldout                                         Run only the Benchmark's held-out Tasks. Each  │
+│                                                   such run is a peek, and is counted.            │
+│ --concurrency       -n      <str>                 Trials to run at once: a number, or auto to    │
+│                                                   size it from this machine, the runtime, and    │
+│                                                   where the model runs.                          │
+│                                                   [default: auto]                                │
+│ --plural-version            <str>                 Plural to install in Docker and remote         │
+│                                                   sandboxes: a version, or latest. Default: this │
+│                                                   CLI's own code.                                │
+│ --dry-run                                         Advanced: validate and show the plan without   │
+│                                                   running.                                       │
+│ --listen                    <str>                 For an external Agent: HOST:PORT where this    │
+│                                                   run serves its episodes.                       │
+│                                                   [default: 127.0.0.1:0]                         │
+│ --public-url                <str>                 For an external Agent: the https base URL it   │
+│                                                   reaches this run at, when that differs from    │
+│                                                   --listen, such as behind a proxy.              │
+│ --tls-cert                  <path>                For an external Agent: the certificate to      │
+│                                                   serve https with.                              │
+│ --tls-key                   <path>                For an external Agent: the key of --tls-cert.  │
+│ --yes               -y                            Use an endpoint Agent's model without asking,  │
+│                                                   even one you have not accepted.                │
+│ --budget-usd                <float range> [x>=0]  At most what the Agents may spend on models.   │
+│                                                   Each Trial gets an even share as its cost      │
+│                                                   limit, and no Trial starts once it is spent.   │
+│ --detach                                          Run the Job in a Daytona sandbox instead of on │
+│                                                   this machine, and return. Its Environments     │
+│                                                   must use the local Runtime, which runs inside  │
+│                                                   the sandbox. It records the Job in the hosted  │
+│                                                   project as it runs. Follow it with plural job  │
+│                                                   show.                                          │
+│ --json                                            Print machine-readable JSON.                   │
+│ --help                                            Show this message and exit.                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -3000,6 +3014,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
 │ show        Show a Trial's result, Verifier evidence, and artifacts (local first, then hosted).  │
 │ rerun       Run one Trial again with its pinned inputs, as a new one-Trial Job.                  │
+│ resume      Continue a Trial whose runner died from its latest run checkpoint.                   │
 │ checkpoint  Name the moment after one step of a Trial, to fork from it or start a Task there.    │
 │ fork        Continue a Trial from step k with other Agents, beside controls that rerun the       │
 │             original.                                                                            │
@@ -3098,6 +3113,29 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --record          Record the rerun in the hosted project as it runs.                             │
 │ --json            Print machine-readable JSON.                                                   │
 │ --help            Show this message and exit.                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+### `plural trial resume`
+
+```text
+
+ Usage: plural trial resume [OPTIONS] {trial_id}
+
+ Continue a Trial whose runner died from its latest run checkpoint.
+
+ An Environment with checkpoint_every marks run checkpoints as the episode
+ runs. The world, the workspace, the clock, and the Agent's context are
+ restored as they stood there, and the cost, turns, and time spent before carry over.
+
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
+│ *    trial_id      <str>  Interrupted local Trial to continue. [required]                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --budget-usd        <float range> [x>=0]  At most what the resumed execution may spend on        │
+│                                           models, on top of what it had.                         │
+│ --json                                    Print machine-readable JSON.                           │
+│ --help                                    Show this message and exit.                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

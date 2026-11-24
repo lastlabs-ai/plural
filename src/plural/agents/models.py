@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -20,6 +21,7 @@ from plural._deprecation import renamed_attribute, renamed_keys
 from plural.agents.tool_overrides import ToolOverride, tool_override_map
 from plural.catalog import ModelCatalog
 from plural.common import (
+    ContextStrategy,
     FrozenModel,
     HarnessBinding,
     HarnessPackage,
@@ -149,6 +151,97 @@ class ExternalAgent(FrozenModel):
         return SecretReference(name=value).name
 
 
+class ContextPolicy(FrozenModel):
+    """How an Agent's Harness keeps its context within bounds over a long episode.
+
+    ``window`` drops the oldest turns once the context is over ``max_tokens``,
+    keeping the instructions, the Task, and the last ``keep_last_turns``
+    turns. ``summarize`` replaces all but the instructions and the last turns
+    with a summary the Agent's own model writes, billed to the Agent. ``none``
+    keeps everything. Each compaction is recorded in the episode, and a
+    checkpoint holds the context as it stood after it.
+    """
+
+    strategy: ContextStrategy = "none"
+    max_tokens: int | None = Field(default=None, ge=1000)
+    keep_last_turns: int = Field(default=4, ge=1, le=200)
+    summary_instructions: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=4000,
+        description="For summarize: what the summary keeps, as the system prompt of the "
+        "summarizing call. By default it keeps the task, decisions made, and anything still "
+        "pending.",
+        exclude_if=lambda value: value is None,
+    )
+
+    @model_validator(mode="after")
+    def _limit(self) -> ContextPolicy:
+        if self.strategy != "none" and self.max_tokens is None:
+            raise ValueError(f"context strategy {self.strategy!r} needs max_tokens")
+        if self.summary_instructions is not None and self.strategy != "summarize":
+            raise ValueError("summary_instructions applies only to strategy summarize")
+        return self
+
+
+def context_policy(config: Mapping[str, Any]) -> ContextPolicy | None:
+    """The context policy in a ``harness_config``, if it chooses one.
+
+    Returns:
+        The policy, or ``None``.
+    """
+    value = config.get("context")
+    if value is None or isinstance(value, ContextPolicy):
+        return value
+    return ContextPolicy.model_validate(value)
+
+
+def without_context(config: Mapping[str, Any]) -> tuple[dict[str, Any], Any]:
+    """Split a ``harness_config`` into the Harness's own options and the context policy.
+
+    Returns:
+        ``(options, context)``, the context ``None`` when it chooses none.
+    """
+    options = dict(config)
+    return options, options.pop("context", None)
+
+
+def with_context(config: Mapping[str, Any], context: Any) -> dict[str, Any]:
+    """A ``harness_config`` with a context policy put back.
+
+    Returns:
+        The options, plus ``context`` unless it is ``None``.
+    """
+    return dict(config) if context is None else {**config, "context": context}
+
+
+def context_into_harness_config(value: Any) -> Any:
+    """Move an Agent's old top-level ``context`` into ``harness_config.context``.
+
+    Agent revisions written before the context policy moved to the Harness keep
+    loading, with the same identity.
+
+    Returns:
+        The Agent payload, with no top-level ``context``.
+
+    Raises:
+        ValueError: If it sets a different policy in both places.
+    """
+    if not isinstance(value, dict) or "context" not in value:
+        return value
+    payload = dict(value)
+    context = payload.pop("context")
+    if context is None:
+        return payload
+    key = "harness_kwargs" if "harness_kwargs" in payload else "harness_config"
+    config = dict(payload.get(key) or {})
+    if config.get("context") not in (None, context):
+        raise ValueError("This Agent sets context twice. Set it once, in harness_config.context.")
+    config["context"] = context
+    payload[key] = config
+    return payload
+
+
 class Agent(FrozenModel):
     """A catalog-backed model and its optional execution harness.
 
@@ -185,7 +278,9 @@ class Agent(FrozenModel):
         validation_alias=AliasChoices("harness_config", "harness_kwargs"),
         description=(
             "Options for the Agent's Harness. A built-in Harness validates them; a custom "
-            "one reads them in self.config, over its own config."
+            "one reads them in self.config, over its own config. context chooses one of "
+            "the Harness's context strategies: {strategy: window | summarize | none, "
+            "max_tokens, keep_last_turns}."
         ),
     )
     auth: AuthMode = Field(
@@ -233,6 +328,16 @@ class Agent(FrozenModel):
 
     @model_validator(mode="before")
     @classmethod
+    def _context_in_harness_config(cls, value: Any) -> Any:
+        return context_into_harness_config(value)
+
+    @property
+    def context(self) -> ContextPolicy | None:
+        """The context policy the Agent chose in ``harness_config.context``."""
+        return context_policy(self.harness_config)
+
+    @model_validator(mode="before")
+    @classmethod
     def _external_ca_bundle(cls, value: Any, info: ValidationInfo) -> Any:
         context = info.context if isinstance(info.context, dict) else {}
         root = context.get("root")
@@ -257,6 +362,8 @@ class Agent(FrozenModel):
             self._validate_endpoint_agent()
             if self.harness is not None:
                 self._check_custom_harness()
+            else:
+                self._check_native_harness()
             return self
         selected = catalog.get(self.model)
         if selected is None:
@@ -289,17 +396,16 @@ class Agent(FrozenModel):
             )
 
             spec = get_builtin(self.harness)
+            self._check_context(spec.context_strategies, self.harness)
             if not model_supported(self.model, spec.supported_models):
                 allowed = ", ".join(spec.supported_models)
                 raise ValueError(
                     f"Cannot attach Harness {self.harness!r} to model {self.model!r}.\n"
                     f"This built-in accepts: {allowed}."
                 )
-            object.__setattr__(
-                self,
-                "harness_config",
-                normalize_kwargs(self.harness, self.harness_config, root=root_path),
-            )
+            options, context = without_context(self.harness_config)
+            normalized = normalize_kwargs(self.harness, options, root=root_path)
+            object.__setattr__(self, "harness_config", with_context(normalized, context))
             undeclared = sorted(set(self.secrets) - set(spec.secret_names))
             if undeclared:
                 raise ValueError(
@@ -307,16 +413,46 @@ class Agent(FrozenModel):
                 )
         elif self.harness is not None:
             self._check_custom_harness()
-        elif self.harness_config:
-            raise ValueError(
-                "harness_config sets options of this Agent's Harness, and the native Harness "
-                "takes none. Name a Harness with `harness:`, or remove harness_config."
-            )
+        else:
+            self._check_native_harness()
         return self
 
+    def _check_context(self, strategies: tuple[str, ...], harness: str) -> None:
+        policy = self.context
+        if policy is None:
+            object.__setattr__(self, "harness_config", without_context(self.harness_config)[0])
+            return
+        if policy.strategy not in strategies:
+            offered = ", ".join(strategies) if strategies else "no context policy"
+            raise ValueError(
+                f"Cannot set context strategy {policy.strategy!r} on Agent "
+                f"{self.name or self.model!r}: Harness {harness!r} supports {offered}. "
+                "Its context_strategies() lists what it carries out."
+            )
+        object.__setattr__(
+            self,
+            "harness_config",
+            with_context(self.harness_config, policy.model_dump(mode="json")),
+        )
+
+    def _check_native_harness(self) -> None:
+        from plural.harness.builtins import NATIVE_CONTEXT_STRATEGIES
+
+        options, _ = without_context(self.harness_config)
+        if options:
+            raise ValueError(
+                "harness_config sets options of this Agent's Harness, and the native Harness "
+                "takes only context. Name a Harness with `harness:`, or remove "
+                f"{', '.join(sorted(options))} from harness_config."
+            )
+        self._check_context(NATIVE_CONTEXT_STRATEGIES, "native")
+
     def _check_custom_harness(self) -> None:
+        from plural.harness.builtins import package_context_strategies
+
         assert self.harness is not None and not isinstance(self.harness, str)
         package = self.harness._package()
+        self._check_context(package_context_strategies(package), package.definition.name)
         undeclared = sorted(set(self.secrets) - set(package.definition.secret_names))
         if undeclared:
             raise ValueError(
@@ -412,7 +548,7 @@ class Agent(FrozenModel):
         if isinstance(self.harness, str):
             from plural.harness.builtins import resolve_builtin_package
 
-            return resolve_builtin_package(self.harness, self.harness_config)
+            return resolve_builtin_package(self.harness, without_context(self.harness_config)[0])
         return self.harness._package() if self.harness is not None else None
 
     @property
@@ -446,7 +582,7 @@ class Agent(FrozenModel):
             routing=self.routing,
             harness=(HarnessBinding.from_package(harness_package) if harness_package else None),
             harness_package=harness_package,
-            harness_config=self.harness_config,
+            harness_config=without_context(self.harness_config)[0],
             auth=self.auth,
             secrets=self.secrets,
             endpoint=self.endpoint,
@@ -454,6 +590,7 @@ class Agent(FrozenModel):
             external=self.external,
             credentials=self.credentials,
             tool_overrides=self.tool_overrides,
+            context=self.context,
             metadata=self.metadata,
         )
 
@@ -489,6 +626,8 @@ class AgentDefinition(FrozenModel):
     """The credentials this Agent supplies to Apps, by name. Never their values."""
     tool_overrides: dict[str, ToolOverride] = Field(default_factory=dict)
     """How the Environment's tools are described to the model, by tool name."""
+    context: ContextPolicy | None = None
+    """How the Harness keeps a long episode's context within bounds."""
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     _credential_map = field_validator("credentials", mode="before")(_credential_map)
@@ -501,7 +640,23 @@ class AgentDefinition(FrozenModel):
         # Agents with no overrides keep the identity and wire form they had before them.
         if isinstance(data, dict) and not self.tool_overrides:
             data.pop("tool_overrides", None)
+        if isinstance(data, dict) and self.context is None:
+            data.pop("context", None)
         return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def _context_from_harness_config(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        key = "harness_config" if "harness_config" in value else "harness_kwargs"
+        config = value.get(key)
+        if not isinstance(config, dict) or "context" not in config:
+            return value
+        options, context = without_context(config)
+        if value.get("context") is not None and context is not None:
+            raise ValueError("Set the context policy once, in harness_config.context")
+        return {**value, key: options, "context": context}
 
     harness_kwargs = renamed_attribute("harness_kwargs", "harness_config")
     auth_mode = renamed_attribute("auth_mode", "auth")

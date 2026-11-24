@@ -5,9 +5,10 @@ evidence, and the forks that tested it. Its status is computed here from those
 forks, never chosen by the model:
 
 - ``confirmed``: a fork that made the proposed change beat its controls;
-- ``refuted``: every fork with enough attempts showed the change made no
-  difference, or made things worse;
-- ``inconclusive``: forks ran, but too few to decide;
+- ``refuted``: every fork that decided ruled out any improvement: the top of its
+  interval is at or below zero;
+- ``inconclusive``: forks ran, but too few to decide, or their intervals still
+  allow an improvement;
 - ``inferred``: no fork tested it.
 
 A Job's Findings are saved beside it, in ``findings.json``.
@@ -16,14 +17,16 @@ A Job's Findings are saved beside it, in ``findings.json``.
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
+from plural.agents.models import ContextPolicy, context_into_harness_config, context_policy
 from plural.agents.tool_overrides import ToolOverride
 from plural.common import FrozenModel
 from plural.stats import ForkVerdict
@@ -34,6 +37,25 @@ FINDINGS_FILE = "findings.json"
 """Beside a Job's ``result.json``: the Findings ``plural job inspect`` recorded."""
 
 
+def mentions(text: str, name: str) -> bool:
+    """Whether lowercased ``text`` names ``name`` as a whole word or identifier.
+
+    Returns:
+        True when it does.
+    """
+    return re.search(rf"(?<![\w-]){re.escape(name.lower())}(?![\w-])", text) is not None
+
+
+def _strings(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [text for item in value.values() for text in _strings(item)]
+    if isinstance(value, list):
+        return [text for item in value for text in _strings(item)]
+    return []
+
+
 class Remedy(FrozenModel):
     """A change to the Agent that a Finding proposes, and ``plural agent revise`` applies.
 
@@ -41,7 +63,9 @@ class Remedy(FrozenModel):
         instructions: The Agent's whole new instructions.
         tool_overrides: How tools are described to the model, by tool name.
         model: Another model.
-        harness_config: Harness settings to set.
+        harness_config: Harness settings to set, including ``context``, the Agent's
+            whole new context policy, such as summary instructions that keep what a
+            summary lost.
         note: What to change, in words, for an External Agent's team.
     """
 
@@ -50,6 +74,22 @@ class Remedy(FrozenModel):
     model: str | None = Field(default=None, min_length=1)
     harness_config: dict[str, Any] = Field(default_factory=dict)
     note: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _context_in_harness_config(cls, value: Any) -> Any:
+        return context_into_harness_config(value)
+
+    @field_validator("harness_config")
+    @classmethod
+    def _valid_context(cls, value: dict[str, Any]) -> dict[str, Any]:
+        policy = context_policy(value)
+        return value if policy is None else {**value, "context": policy.model_dump(mode="json")}
+
+    @property
+    def context(self) -> ContextPolicy | None:
+        """The context policy the remedy chooses in ``harness_config.context``."""
+        return context_policy(self.harness_config)
 
     @property
     def empty(self) -> bool:
@@ -60,6 +100,27 @@ class Remedy(FrozenModel):
             and self.model is None
             and not self.harness_config
         )
+
+    @property
+    def text(self) -> str:
+        """Every word the remedy would ship to the Agent, lowercased.
+
+        That is its instructions, tool descriptions, string Harness settings (such as
+        context summary instructions), and note.
+        """
+        parts = [self.instructions or "", self.note]
+        parts += [item.description or "" for item in self.tool_overrides.values()]
+        parts += _strings(self.harness_config)
+        return "\n".join(parts).lower()
+
+    def names(self, entities: Iterable[str]) -> list[str]:
+        """Which of ``entities`` the remedy names, as whole words.
+
+        Returns:
+            The names it mentions, sorted.
+        """
+        text = self.text
+        return sorted(name for name in entities if mentions(text, name))
 
     def describe(self) -> list[str]:
         """The remedy in short lines.
@@ -77,7 +138,10 @@ class Remedy(FrozenModel):
                 f"tool {name}: hidden" if item.hidden else f"tool {name}: {item.description}"
             )
         for key, value in sorted(self.harness_config.items()):
-            lines.append(f"harness_config.{key}: {json.dumps(value)}")
+            if key == "context" and self.context is not None:
+                lines.append(f"harness_config.context: {self.context.strategy}, rewritten")
+            else:
+                lines.append(f"harness_config.{key}: {json.dumps(value)}")
         if self.note:
             lines.append(self.note)
         return lines
@@ -135,6 +199,15 @@ class ForkTest(FrozenModel):
             and self.control is not None
             and self.candidate > self.control
         )
+
+    @property
+    def ruled_out(self) -> bool:
+        """Whether the fork decided the change doesn't help: no improvement is in its interval."""
+        if self.verdict == "too_few":
+            return False
+        if self.high is None:
+            return not self.beat_controls
+        return self.high <= 0
 
 
 class Finding(FrozenModel):
@@ -208,10 +281,13 @@ def finding_status(
     whatever its forks showed. A fork judged on other gates than the Finding's
     tested another cause, and doesn't count.
 
+    A fork with an interval that still allows an improvement hasn't decided, so
+    two out of four against none out of four is ``inconclusive``, not ``refuted``.
+
     Returns:
         ``confirmed`` when a fork beat its controls; ``refuted`` when every
-        fork with enough attempts did not; ``inconclusive`` when none had
-        enough; ``inferred`` with no forks, or for a cause outside the Agent.
+        fork that decided ruled out any improvement; ``inconclusive``
+        otherwise; ``inferred`` with no forks, or for a cause outside the Agent.
 
     Examples:
         >>> finding_status([])
@@ -223,7 +299,8 @@ def finding_status(
         return "inferred"
     if any(item.beat_controls for item in forks):
         return "confirmed"
-    if any(item.verdict != "too_few" for item in forks):
+    decided = [item for item in forks if item.verdict != "too_few"]
+    if decided and all(item.ruled_out for item in decided):
         return "refuted"
     return "inconclusive"
 
@@ -384,6 +461,7 @@ __all__ = [
     "breakdown",
     "finding_status",
     "load_findings",
+    "mentions",
     "now",
     "number_findings",
     "restatus",

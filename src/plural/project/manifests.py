@@ -20,12 +20,15 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from plural.common import HarnessTool
+from plural.common import ContextStrategy, HarnessTool
 from plural.environments.definition import (
+    Clock,
     EnvironmentResource,
+    Every,
     ExecutionLimits,
     Guardrail,
     HarnessPolicy,
+    Horizon,
     Party,
 )
 from plural.tasks import BenchmarkRelease, without_reset_options
@@ -117,6 +120,29 @@ class EnvironmentManifest(ManifestModel):
             "number for an exact size. Leave it out for an Environment one Agent works alone."
         ),
     )
+    clock: Clock | None = Field(
+        default=None,
+        description=(
+            "Simulated time, such as {unit: day, start: 1}. The Environment then offers a "
+            "wait action, and its Apps' scheduled events happen as time passes."
+        ),
+    )
+    horizon: Horizon | None = Field(
+        default=None,
+        description="When the episode ends on its own, such as {sim_time: 365}.",
+    )
+    autonomous: bool = Field(
+        default=False,
+        description="Run until the horizon: a reply with no tool call waits. Needs a clock.",
+    )
+    allow_finish: bool | None = Field(
+        default=None,
+        description="Whether the Agent may end the episode. Unset: unless autonomous.",
+    )
+    checkpoint_every: Every | None = Field(
+        default=None,
+        description="Save a run checkpoint this often, such as {sim_time: 10} or {steps: 50}.",
+    )
     guardrails: list[Guardrail] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     reference: str | None = Field(
@@ -183,6 +209,18 @@ class TaskManifest(ManifestModel):
             "instructions, keyed seat_1, seat_2, and so on."
         ),
     )
+    party_size: int | None = Field(
+        default=None,
+        ge=2,
+        le=100,
+        description="For an Environment with a party: how many Agents play, pinned. A "
+        "Benchmark needs it, so every Agent is ranked on the same game.",
+    )
+    competitive: bool = Field(
+        default=False,
+        description="For an Environment with a party: whether the seats play against each "
+        "other. A Benchmark then fixes its opponents and refuses a shared party.",
+    )
     reference: str | None = Field(
         default=None,
         pattern=r"^[\w./-]+\.py:[A-Za-z_]\w*$",
@@ -199,7 +237,14 @@ class TaskManifest(ManifestModel):
     def _removed_fields(cls, value: Any) -> Any:
         if not isinstance(value, dict):
             return value
-        return without_reset_options(dict(value), value.get("name"))
+        value = dict(value)
+        if "party" in value:
+            if "party_size" in value:
+                raise ValueError(
+                    f"Task {value.get('name')!r} sets party and party_size. Keep party_size."
+                )
+            value["party_size"] = value.pop("party")
+        return without_reset_options(value, value.get("name"))
 
 
 class HarnessManifest(ManifestModel):
@@ -234,6 +279,12 @@ class HarnessManifest(ManifestModel):
         default=False,
         description="Whether the loop reads environment.resume and continues a history "
         "as its own conversation, when a fork starts it mid-episode.",
+    )
+    context_strategies: list[ContextStrategy] | None = Field(
+        default=None,
+        description="The context policies the loop carries out, which an Agent chooses "
+        "in harness_config.context: window, summarize, none. Overrides the class's "
+        "context_strategies().",
     )
 
 

@@ -1,0 +1,10 @@
+# Harness: a concession schedule with no model. It opens far from its private number
+# and moves a fixed share of the way toward it each turn; it accepts an offer as good
+# as its next one, and never one that loses money.
+name: steady-haggler
+version: 1.0.0
+description: A fixed concession schedule for negotiation Tasks, with no model.
+python: harness.py:SteadyHaggler
+config:
+  open_margin: 0.6
+  concede: 0.2

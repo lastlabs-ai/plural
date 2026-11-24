@@ -1,0 +1,15 @@
+# Task: vend-quarter with day 1 on another weekday, so its customers come in a
+# different order. Held out: kept back for confirmation, and run only by
+# `plural run --benchmark vending-quarter --heldout`.
+name: vend-quarter-h1
+version: 1.0.0
+instructions: instruction.md
+environment: vending
+verifiers:
+  - vending-books
+expected:
+  target_profit: 600
+initial_state:
+  machine:
+    days: 90
+    start_weekday: 4

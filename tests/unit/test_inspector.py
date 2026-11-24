@@ -136,7 +136,7 @@ def test_signals_built_in_and_from_the_project(failed_job: dict[str, Any]) -> No
 def test_finding_status_is_computed_from_the_forks() -> None:
     from plural.inspector.findings import ForkTest, finding_status
 
-    def test(verdict: str, candidate: float, control: float) -> ForkTest:
+    def test(verdict: str, candidate: float, control: float, high: float | None = None) -> ForkTest:
         return ForkTest(
             test_id="X1",
             job_id="job_1",
@@ -144,13 +144,16 @@ def test_finding_status_is_computed_from_the_forks() -> None:
             verdict=verdict,  # type: ignore[arg-type]
             candidate=candidate,
             control=control,
+            high=high,
             candidates=4,
             controls=4,
         )
 
     assert finding_status(()) == "inferred"
     assert finding_status((test("likely_matters", 1.0, 0.0),)) == "confirmed"
-    assert finding_status((test("likely_matters", 0.0, 1.0),)) == "refuted"
+    assert finding_status((test("likely_matters", 0.0, 1.0, high=-0.25),)) == "refuted"
+    assert finding_status((test("no_clear_effect", 0.0, 0.0, high=0.0),)) == "refuted"
+    assert finding_status((test("no_clear_effect", 0.5, 0.0, high=1.0),)) == "inconclusive"
     assert finding_status((test("no_clear_effect", 0.5, 0.5),)) == "refuted"
     assert finding_status((test("too_few", 1.0, 0.0),)) == "inconclusive"
     beaten = (test("likely_matters", 1.0, 0.0),)
@@ -211,6 +214,89 @@ def test_record_finding_checks_its_cause_evidence_and_forks(failed_job: dict[str
     assert app.terminated()
 
 
+def test_entity_names_come_from_collections_named_fields_and_identifiers() -> None:
+    from plural.inspector.evidence import entity_names
+    from plural.inspector.findings import Remedy
+
+    state = {
+        "storage": {"units": {"soda": 30, "water": 30}, "status": "open"},
+        "machine": {"last_day": {"revenue": 28.5, "sold": {"soda": 6}}},
+        "suppliers": {
+            "open_orders": [{"supplier": "harbor-wholesale", "product": "soda", "units": 60}],
+            "threads": {"Dana Reyes": ["Can you deliver Monday?"]},
+        },
+        "bank": {"account_id": "acct-1042", "note": "settled"},
+    }
+    names = entity_names(state)
+    assert names >= {"soda", "water", "harbor-wholesale", "Dana Reyes", "acct-1042"}
+    # Fields are never entities, nor a record's keys, nor free text in a field that
+    # names nothing.
+    assert not names & {"storage", "units", "open_orders", "supplier", "status", "open", "note"}
+    assert not names & {"last_day", "revenue", "sold"}
+    assert entity_names({"secret": "nymph"}) == set()
+    assert entity_names({"secret": "nymph"}, authored=True) == {"nymph"}
+
+    remedy = Remedy(
+        instructions="Reorder from Harbor-Wholesale before stock runs out.",
+        tool_overrides={"message": {"description": "Write to acct-1042."}},
+        harness_config={
+            "context": {
+                "strategy": "summarize",
+                "max_tokens": 8000,
+                "summary_instructions": "Keep soda.",
+            }
+        },
+    )
+    found = {"harbor-wholesale", "acct-1042", "soda", "water", "dana reyes"}
+    assert remedy.names(found) == ["acct-1042", "harbor-wholesale", "soda"]
+    assert Remedy(instructions="Keep sodas and watering cans.").names(found) == []
+
+
+def test_a_remedy_that_names_the_tasks_own_entities_is_refused(
+    failed_job: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from plural.inspector.app import CREDENTIAL
+
+    app = _app(failed_job)
+    trial = app._trial()
+    specific = app._job.task_entities(trial)
+    assert "nymph" in specific
+    # crane is the other Task's word; the Agent's own guesses are not the Task's.
+    assert "crane" not in specific and "wordle" not in specific
+    with pytest.raises(ValueError, match="names 'nymph'.*Task nymph alone"):
+        app.record_finding(
+            cause="instructions",
+            summary="It never guessed the word.",
+            evidence=["six guesses"],
+            critical_step=6,
+            instructions="Play Wordle. If the word ends in -ymph, guess NYMPH.",
+        )
+    with pytest.raises(ValueError, match="names 'nymph'"):
+        app.record_finding(
+            cause="instructions",
+            summary="s",
+            evidence=["e"],
+            critical_step=6,
+            note="Tell it the answer is nymph.",
+        )
+    assert not app.state.findings
+
+    forking = _app(failed_job, depth="standard")
+    monkeypatch.setenv(CREDENTIAL, "unused")
+    with pytest.raises(ValueError, match="names 'nymph'"):
+        forking.fork(step=2, instructions="Guess nymph.")
+    assert not forking.state.tests
+
+    app.record_finding(
+        cause="instructions",
+        summary="It never used the letters the feedback ruled in.",
+        evidence=["six guesses"],
+        critical_step=6,
+        instructions="Play Wordle. Each guess must keep every letter marked present.",
+    )
+    assert app.state.findings[0]["remedy"]["instructions"].startswith("Play Wordle.")
+
+
 def test_a_model_finding_needs_a_stronger_model_that_beat_the_controls(
     failed_job: dict[str, Any],
 ) -> None:
@@ -246,6 +332,54 @@ def test_a_model_finding_needs_a_stronger_model_that_beat_the_controls(
     assert app.record_finding(cause="model", summary="s", evidence=["e"], tests=["X4"]) == (
         "Recorded: model, confirmed."
     )
+
+
+def test_a_confirmed_finding_ships_the_remedy_its_fork_tested(
+    failed_job: dict[str, Any],
+) -> None:
+    context = {"strategy": "summarize", "max_tokens": 8000, "summary_instructions": "Keep it."}
+    tested = {"harness_config": {"context": context}}
+
+    def inspector() -> Any:
+        app = _app(failed_job)
+        app.state.tests.append(
+            {
+                "test_id": "X1",
+                "job_id": "job_fork",
+                "step": 2,
+                "remedy": tested,
+                "verdict": "likely_matters",
+                "candidate": 0.75,
+                "control": 0.0,
+                "low": 0.25,
+                "high": 1.0,
+                "candidates": 4,
+                "controls": 4,
+            }
+        )
+        return app
+
+    app = inspector()
+    with pytest.raises(ValueError, match="This remedy wasn't tested: X1"):
+        app.record_finding(
+            cause="context",
+            summary="The summary lost the clues.",
+            evidence=["step 3"],
+            tests=["X1"],
+            instructions="Remember every clue.",
+        )
+    assert app.record_finding(
+        cause="context", summary="s", evidence=["e"], tests=["X1"], note="Keep the clues."
+    ) == ("Recorded: context, confirmed.")
+    recorded = app.state.findings[0]["remedy"]
+    assert recorded["harness_config"]["context"]["summary_instructions"] == "Keep it."
+    assert recorded["instructions"] is None and recorded["note"] == "Keep the clues."
+
+    again = inspector()
+    again.record_finding(
+        cause="context", summary="s", evidence=["e"], tests=["X1"], context=context
+    )
+    assert again.state.findings[0]["remedy"]["harness_config"] == recorded["harness_config"]
 
 
 def test_forks_may_switch_only_to_the_allowed_models(
@@ -456,6 +590,14 @@ def test_revise_applies_a_confirmed_finding_as_a_new_version(
         revise_agent(space, "scripted", "F1")
     _save(job, remedy={"tool_overrides": {"guess": {"description": "Guess a word."}}})
     assert revise_agent(space, "scripted", "F1").version == "1.2.0"
+    # A Finding saved before the context policy moved to the Harness still applies.
+    _save(job, remedy={"context": {"strategy": "window", "max_tokens": 8000}})
+    assert revise_agent(space, "scripted", "F1").version == "1.3.0"
+    written = yaml.safe_load((project / "agents/scripted/agent.yaml").read_text())
+    assert "context" not in written
+    assert written["harness_config"]["context"]["strategy"] == "window"
+    loaded = Workspace(Project.at(project)).get("agent", "scripted")
+    assert loaded.context is not None and loaded.context.max_tokens == 8000
 
 
 def test_revise_writes_a_fix_note_for_an_external_agent(
@@ -511,6 +653,44 @@ def test_the_report_computes_every_number_with_its_trials(failed_job: dict[str, 
     assert validate_summary("It passed 1 of 2.", report.facts)
 
 
+def test_the_report_compares_a_dollar_metric_in_its_unit_and_direction() -> None:
+    from types import SimpleNamespace
+
+    from plural.inspector.report import _Facts, _metric_change
+    from plural.metrics import MetricSpec
+
+    def job(job_id: str, worth: dict[str, list[float]]) -> Any:
+        trials = [
+            SimpleNamespace(
+                task=task,
+                metrics={"net_worth_usd": value},
+                receipt=SimpleNamespace(trial_id=f"{job_id}-{task}-{index}"),
+            )
+            for task, values in worth.items()
+            for index, value in enumerate(values)
+        ]
+        return SimpleNamespace(
+            job_id=job_id,
+            heldout=set(),
+            finished=lambda: trials,
+            task=lambda trial: trial.task,
+        )
+
+    tasks = [f"seed-{index}" for index in range(12)]
+    new = job("job-2", {task: [1500.0 + index] for index, task in enumerate(tasks)})
+    old = job("job-1", {task: [1000.0 + index] for index, task in enumerate(tasks)})
+    spec = MetricSpec(name="net_worth_usd", kind="number", unit="USD")
+    facts = _Facts()
+    change = _metric_change(new, old, spec, "dev", facts)
+    shown = {item.fact_id: item.display for item in facts.items}
+    assert change is not None and change["verdict"] == "better"
+    assert (change["unit"], change["direction"]) == ("USD", "higher")
+    assert shown[change["new"]] == "$1,506" and shown[change["delta"]] == "+$500"
+    # Lower is better for a cost: the same rise is then worse.
+    costly = MetricSpec(name="net_worth_usd", kind="number", unit="USD", direction="lower")
+    assert _metric_change(new, old, costly, "dev", _Facts())["verdict"] == "worse"  # type: ignore[index]
+
+
 def test_a_summary_that_writes_its_own_numbers_is_rejected(
     failed_job: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -549,6 +729,43 @@ def test_remedy_agents_merge_tool_overrides() -> None:
     assert changed.name == "bot-x1"
     assert changed.agent.instructions == "Always check the schedule."
     assert changed.agent.tool_overrides["check_schedule"].description == "Required."
+
+
+def test_a_remedy_can_change_the_context_policy() -> None:
+    from plural.agents import Agent, AgentBinding
+    from plural.agents.models import ContextPolicy
+    from plural.inspector.experiments import remedy_agent
+    from plural.inspector.findings import ForkTest, Remedy, stronger_model_won
+
+    agent = Agent(
+        name="bot",
+        model="openai/gpt-5.6-luna",
+        context={"strategy": "summarize", "max_tokens": 20000},
+    )
+    policy = ContextPolicy(
+        strategy="summarize",
+        max_tokens=20000,
+        summary_instructions="Keep the supplier accounts and standing orders.",
+    )
+    remedy = Remedy(context=policy)
+    assert remedy == Remedy(harness_config={"context": policy.model_dump(mode="json")})
+    assert not remedy.empty
+    assert remedy.describe() == ["harness_config.context: summarize, rewritten"]
+    changed = remedy_agent(AgentBinding(agent=agent._definition()), remedy, "X1")
+    assert changed.agent.context == policy
+    assert changed.agent.instructions == agent.instructions
+    fork = ForkTest(
+        test_id="X1",
+        job_id="j",
+        step=3,
+        remedy=Remedy(model="openai/gpt-5.6-sol", context=policy),
+        verdict="likely_matters",
+        candidate=1.0,
+        control=0.0,
+        candidates=4,
+        controls=4,
+    )
+    assert not stronger_model_won(fork, "openai/gpt-5.6-luna")
 
 
 def test_every_fault_applies_to_the_quoting_example(tmp_path: Path) -> None:

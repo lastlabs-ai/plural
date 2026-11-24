@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import statistics
 from collections.abc import Iterator, Mapping, Sequence
 from functools import cached_property
@@ -18,7 +19,9 @@ from typing import Any
 from plural.agents import AgentBinding
 from plural.apps.host import STATES_FILE, STEPS_FILE
 from plural.execution.apps import environment_payload
+from plural.harness.builtins import NATIVE_CONTEXT_STRATEGIES, package_context_strategies
 from plural.harness.episode import EPISODE_FILE
+from plural.inspector.findings import mentions
 from plural.jobs import BenchmarkJobSource, JobResult, JobSpec, TrialResult
 from plural.project.layout import Project, ProjectError
 from plural.project.resources import Workspace
@@ -166,6 +169,38 @@ class JobEvidence:
                 "inspected."
             )
         return found
+
+    def task_entities(self, trial: TrialEvidence) -> frozenset[str]:
+        """The things the Trial's Task and its world name, lowercased, that a remedy must not.
+
+        Every account, customer, or item the episode's App State held counts: that is
+        the world's data, which another deployment of the Agent won't share. A value the
+        Task's author wrote counts unless every other dev Task of the Job has it too, as
+        a shared setting does. A name the Agent as it ran or the Environment's actions
+        mention already is part of the Agent's interface, and never counts.
+
+        Returns:
+            The names.
+        """
+        others: dict[str, TrialEvidence] = {}
+        for item in self.trials.values():
+            if item.task.task_id != trial.task.task_id:
+                others.setdefault(item.task.task_id, item)
+        authored = trial.authored_entities
+        if others:
+            authored -= frozenset.intersection(
+                *(item.authored_entities for item in others.values())
+            )
+        specific = trial.world_entities | authored
+        config = trial.agent_config()
+        known = " ".join(
+            [
+                str(config.get("instructions") or ""),
+                json.dumps(config.get("tool_overrides") or {}),
+                json.dumps(trial.environment_actions()),
+            ]
+        ).lower()
+        return frozenset(name for name in specific if not mentions(known, name))
 
     def failed(self) -> list[TrialEvidence]:
         """The dev Trials that didn't pass, in the Job's order.
@@ -361,9 +396,58 @@ class TrialEvidence:
         }
 
     @cached_property
+    def compactions(self) -> list[dict[str, Any]]:
+        """Each time the Harness compacted the Agent's context, under its context policy.
+
+        Each has the model turn it ran before, ``before_step``: the first step the
+        model chose afterwards, the strategy, how many messages it dropped, and the
+        summary that replaced them.
+        """
+        chosen = sorted(self.model_turns.items())
+        rows = []
+        for item in _jsonl(self.artifacts / EPISODE_FILE):
+            if item.get("kind") != "context.compaction":
+                continue
+            turn = int(item.get("turn") or 0)
+            rows.append(
+                {
+                    "turn": turn,
+                    "before_step": next((step for step, at in chosen if at >= turn), None),
+                    "strategy": item.get("strategy"),
+                    "dropped_messages": item.get("dropped_messages"),
+                    "summary": clip(str(item.get("summary") or ""), 1200),
+                }
+            )
+        return rows
+
+    @cached_property
     def states(self) -> list[dict[str, Any]]:
         """The App State after each step, as the App host recorded it."""
         return list(_jsonl(self.artifacts / STATES_FILE))
+
+    @cached_property
+    def authored_entities(self) -> frozenset[str]:
+        """Every name the Task's author wrote, lowercased.
+
+        That is each string in its initial State, info, and answer key.
+        """
+        found: set[str] = set()
+        for value in (self.task.state, self.task.info, self.task.expected):
+            found |= entity_names(value, authored=True)
+        return frozenset(name.lower() for name in found)
+
+    @cached_property
+    def world_entities(self) -> frozenset[str]:
+        """The specific things the episode's world held, lowercased.
+
+        That is members of the App State's collections, values of its fields that name
+        something, and identifiers, after each step. The Agent's own arguments are left
+        out: what it made up is not the world's.
+        """
+        found: set[str] = set()
+        for item in self.states:
+            found |= entity_names(item.get("state") or {})
+        return frozenset(name.lower() for name in found)
 
     @property
     def actions_used(self) -> set[str]:
@@ -750,6 +834,12 @@ class TrialEvidence:
             "instructions": agent.instructions,
             "harness": agent.harness.name if agent.harness else "native",
             "harness_config": dict(agent.harness_config),
+            "context": agent.context.model_dump(mode="json") if agent.context else None,
+            "context_strategies": list(
+                package_context_strategies(agent.harness_package)
+                if agent.harness_package is not None
+                else NATIVE_CONTEXT_STRATEGIES
+            ),
             "tool_overrides": {
                 name: item.model_dump(mode="json", exclude_defaults=True)
                 for name, item in getattr(agent, "tool_overrides", {}).items()
@@ -870,6 +960,68 @@ def _call(item: Mapping[str, Any]) -> tuple[Any, str]:
 
 
 _EMPTY_KEY = "{}"
+
+
+_ENTITY_FIELD = re.compile(
+    r"(?:^|_)(?:id|name|sku|account|customer|client|supplier|vendor|item|product|email|"
+    r"user|company|contact|merchant|order)s?$",
+    re.IGNORECASE,
+)
+_IDENTIFIER = re.compile(r"^(?=.*[A-Za-z])(?=.*[\d@_-])[\w.@+-]{3,64}$")
+_NAME = re.compile(r"^(?=.*[A-Za-z])[\w .@'+-]{3,64}$")
+
+
+def _kind(value: Any) -> str:
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, (int, float)):
+        return "number"
+    return type(value).__name__
+
+
+def entity_names(
+    value: Any,
+    *,
+    authored: bool = False,
+    depth: int = 0,
+    field: str = "",
+    record: bool = False,
+) -> set[str]:
+    """Names of specific things in a Task's data or App State.
+
+    A value of App State is App, then field, then the field's value, so the keys of a
+    mapping below the field whose values are all alike (``units: {soda: 30, water: 30}``)
+    are members of a collection. A mapping with mixed values (``{revenue: 28.5, sold:
+    {...}}``) is a record, and so is one in a list: its keys are fields, never members.
+    A string counts when a field that
+    names something holds it (``customer``, ``sku``, ``*_id``), when it is shaped like an
+    identifier (``acct-1042``, ``harbor-wholesale``), or, in what the Task's author wrote
+    (``authored``), always: a Task's own data is what makes it that Task.
+
+    Returns:
+        The names, as written.
+    """
+    found: set[str] = set()
+    if isinstance(value, Mapping):
+        kinds = {_kind(item) for item in value.values()}
+        collection = depth >= 2 and not record and len(kinds) == 1
+        for key, item in value.items():
+            name = str(key).strip()
+            if collection and _NAME.match(name):
+                found.add(name)
+            found |= entity_names(item, authored=authored, depth=depth + 1, field=name)
+    elif isinstance(value, list):
+        for item in value:
+            found |= entity_names(
+                item, authored=authored, depth=depth + 1, field=field, record=True
+            )
+    elif isinstance(value, str):
+        text = value.strip()
+        if _NAME.match(text) and (
+            authored or _ENTITY_FIELD.search(field) or _IDENTIFIER.match(text)
+        ):
+            found.add(text)
+    return found
 
 
 def _flatten(value: Any, prefix: str = "") -> dict[str, Any]:

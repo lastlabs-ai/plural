@@ -1,0 +1,22 @@
+# Benchmark: two haggling Tasks, each played twice per Agent, once as the buyer and once
+# as the seller (seatings: rotate), against the same fixed opponent every run.
+name: negotiation
+version: 1.0.0
+description: Haggle over two items against a fixed opponent, from both sides of the table.
+purpose: >-
+  Checks that an Agent gets a good price without losing the deal, whichever side it is on.
+tasks:
+  - bike-deal
+  - camera-deal
+opponents:
+  - steady-haggler@1.0.0
+seatings: rotate
+primary_metric: surplus_usd
+scoring:
+  metric: Share of the deal
+  description: Each seat's surplus as a share of the buyer's value less the seller's cost.
+  aggregation: weighted_mean
+  score_range: [0.0, 1.0]
+  success_threshold: 0.5
+  agent_failure: zero
+  infrastructure_error: exclude

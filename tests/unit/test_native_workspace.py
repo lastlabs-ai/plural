@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -233,8 +236,8 @@ def test_a_fork_resumes_the_native_loop_after_its_workspace_tools(
 def _tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setenv("PLURAL_SANDBOX_ROOT", str(tmp_path))
     (tmp_path / "workspace/environment").mkdir(parents=True)
-    (tmp_path / "workspace/.plural-apps-x").mkdir()
-    (tmp_path / "workspace/.plural-apps-x/secret.json").write_text("{}")
+    (tmp_path / "workspace/.apphost-x").mkdir()
+    (tmp_path / "workspace/.apphost-x/secret.json").write_text("{}")
     environment = {"workspace": "/workspace/environment"}
     return native_runner._WorkspaceTools(environment, [{"capability": "shell", "reason": "no"}])
 
@@ -252,7 +255,7 @@ def test_workspace_tools_stay_in_the_workspace(
     assert _dispatch(tools, "read_file", path="out/a.txt") == "hi"
     assert _dispatch(tools, "list_files", path="..") == "out/a.txt"
     assert "outside the workspace" in _dispatch(tools, "read_file", path="../../../etc/hosts")
-    assert "not readable" in _dispatch(tools, "read_file", path="../.plural-apps-x/secret.json")
+    assert "not readable" in _dispatch(tools, "read_file", path="../.apphost-x/secret.json")
     # A denied capability is never offered.
     assert "run" not in {item["function"]["name"] for item in tools.declarations()}
     assert "unknown tool" in _dispatch(tools, "run", command="true")
@@ -320,3 +323,130 @@ def test_command_and_judge_verifiers_read_the_same_workspace(tmp_path: Path, mod
     (prompt,) = JUDGED
     shown = {item["name"]: item for item in prompt["evidence"]["workspace"]}
     assert shown["environment/march-total.txt"]["content"] == "5740.00"
+
+
+_RESUME_HISTORIES: list[list[dict[str, Any]]] = []
+_WRITTEN = threading.Event()
+_RELEASE = threading.Event()
+
+
+class _ResumeModel(BaseHTTPRequestHandler):
+    """Writes a note, then hangs until its runner is killed; once resumed, reads the note."""
+
+    def do_POST(self) -> None:
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        _RESUME_HISTORIES.append(body["messages"])
+        done = sum(message["role"] == "tool" for message in body["messages"])
+        if done == 1 and not _WRITTEN.is_set():
+            _WRITTEN.set()
+            _RELEASE.wait(120)
+            return
+        script = [
+            _call("write_file", path="note.txt", content="remember-42"),
+            _call("read_file", path="note.txt"),
+            {"role": "assistant", "content": "Done."},
+        ]
+        payload = json.dumps(
+            {
+                "choices": [{"message": script[min(done, len(script) - 1)]}],
+                "usage": {"prompt_tokens": 9, "completion_tokens": 3},
+            }
+        ).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, *_args: object) -> None:
+        return
+
+
+def _tree(pid: int) -> list[int]:
+    """The process and every one below it, including those in sessions of their own."""
+    listing = subprocess.run(
+        ["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, check=False
+    ).stdout
+    children: dict[int, list[int]] = {}
+    for line in listing.splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            children.setdefault(int(parts[1]), []).append(int(parts[0]))
+    found, queue = [], [pid]
+    while queue:
+        item = queue.pop()
+        found.append(item)
+        queue.extend(children.get(item, ()))
+    return found
+
+
+@contextlib.contextmanager
+def _plural_process(project: Path, env: dict[str, str], *args: str) -> Iterator[Any]:
+    """Start the CLI and, however the test ends, kill it and everything it started.
+
+    The local Runtime starts the App host and the Harness in sessions of their own, so
+    killing the CLI's process group alone would leave them running.
+    """
+    process = subprocess.Popen(
+        [str(CLI), *args],
+        cwd=project,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        yield process
+    finally:
+        for pid in reversed(_tree(process.pid)):
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(pid, signal.SIGKILL)
+        process.communicate(timeout=30)
+
+
+def test_a_resumed_trial_reads_the_file_it_wrote_before_its_run_checkpoint(
+    tmp_path: Path,
+) -> None:
+    _RESUME_HISTORIES.clear()
+    _WRITTEN.clear()
+    _RELEASE.clear()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _ResumeModel)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        project, env = _project(tmp_path, f"http://127.0.0.1:{server.server_address[1]}")
+        environment = project / "environments/files/environment.yaml"
+        environment.write_text(
+            environment.read_text() + "\ncheckpoint_every:\n  steps: 1\n", encoding="utf-8"
+        )
+        run: Path | None = None
+        with _plural_process(
+            project, env, "run", "-t", "march-total", "-a", "files-native", "--yes", "--json"
+        ):
+            assert _WRITTEN.wait(120), "the Agent never wrote its note"
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                run = next((project / ".plural/jobs").glob("*/trials/*/run"), None)
+                if run is not None and (run / "workspace.bundle").is_file():
+                    break
+                time.sleep(0.5)
+            assert run is not None and (run / "workspace.bundle").is_file()
+        _RELEASE.set()
+        # As if the runner had been gone long enough to count as interrupted.
+        state = json.loads((run / "journal.json").read_text())
+        (run / "journal.json").write_text(json.dumps({**state, "updated": 0}))
+        trial_id = run.parent.name
+
+        with _plural_process(project, env, "trial", "resume", trial_id, "--json") as resumed:
+            stdout, stderr = resumed.communicate(timeout=300)
+        assert resumed.returncode == 0, stdout + stderr
+        assert json.loads(stdout)["resumed"]["step"] == 1
+        answers = [
+            message["content"]
+            for message in _RESUME_HISTORIES[-1]
+            if message["role"] == "tool" and message.get("tool_call_id") == "call_read_file"
+        ]
+        assert answers == ["remember-42"]
+    finally:
+        _RELEASE.set()
+        server.shutdown()

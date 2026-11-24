@@ -264,6 +264,11 @@ def declared_dependencies(kind: str, payload: Mapping[str, Any]) -> tuple[Resour
             for name in payload.get("tasks") or ()
             if isinstance(name, str)
         )
+        refs.extend(
+            ResourceRef(AGENT.name, str(item).partition("@")[0])
+            for item in payload.get("opponents") or ()
+            if isinstance(item, str) and item
+        )
     return tuple(dict.fromkeys(refs))
 
 
@@ -379,6 +384,11 @@ def _build_environment(
             harness_policy=manifest.harness_policy,
             limits=manifest.limits,
             party=manifest.party,
+            clock=manifest.clock,
+            horizon=manifest.horizon,
+            autonomous=manifest.autonomous,
+            allow_finish=manifest.allow_finish,
+            checkpoint_every=manifest.checkpoint_every,
             metadata=manifest.metadata,
             source=directory,
         )
@@ -490,6 +500,14 @@ def _build_verifier(
     prepared = dict(payload)
     prepared.setdefault("kind", "deterministic")
     bound = False
+    measure = prepared.get("measure")
+    if isinstance(measure, dict) and isinstance(measure.get("python"), str):
+        if "every" in measure:
+            if prepared.get("measure_every") is not None:
+                problems.append("measure: give its period once, as measure.every or measure_every")
+                return None
+            prepared["measure_every"] = measure["every"]
+        prepared["measure"] = measure["python"]
     for hook in ("check", "reward", "hindsight", "measure"):
         reference = prepared.get(hook)
         if not (isinstance(reference, str) and _looks_like_reference(reference)):
@@ -571,6 +589,9 @@ def _build_harness(
         cls.tools = classmethod(lambda _cls: declared)  # type: ignore[method-assign,assignment]
     if manifest.supports_resume:
         cls.supports_resume = True
+    if manifest.context_strategies is not None:
+        strategies = tuple(manifest.context_strategies)
+        cls.context_strategies = classmethod(lambda _cls: strategies)  # type: ignore[method-assign,assignment]
     cls._bound_python_source = source
     cls._bound_python_object = object_path
     try:
@@ -630,6 +651,8 @@ def _load_task(workspace: Workspace, ref: ResourceRef, directory: Path) -> Local
                         "initial_state": manifest.initial_state,
                         "expected": manifest.expected,
                         "seat_instructions": manifest.seat_instructions,
+                        "party_size": manifest.party_size,
+                        "competitive": manifest.competitive,
                         "from_checkpoint": manifest.from_checkpoint,
                         "checkpoint": checkpoint,
                         "checkpoint_bundle": str(bundle) if bundle is not None else None,
@@ -775,6 +798,15 @@ def _load_benchmark(workspace: Workspace, ref: ResourceRef, directory: Path) -> 
         problems.extend(item for item in tasks if isinstance(item, str))
         loaded = [item for item in tasks if isinstance(item, LocalResource)]
         problems.extend(_score_compatibility(manifest, loaded))
+        for item in manifest.opponents:
+            name, _, version = item.partition("@")
+            opponent = _dependency(workspace, ResourceRef(AGENT.name, name))
+            if isinstance(opponent, str):
+                problems.append(f"opponents: {opponent}")
+            elif version and opponent.value.version != version:
+                problems.append(
+                    f"opponents: {item} is at version {opponent.value.version} in this project"
+                )
         if not problems:
             try:
                 benchmark = Benchmark.model_validate(

@@ -1284,7 +1284,9 @@ class _Prepared:
         if kind == AGENT.name:
             return {"harness_revision_id": ids[0] if ids else None}
         if kind == BENCHMARK.name:
-            return {"task_revision_ids": ids}
+            # A Benchmark also depends on its opponents' Agents, which it names, not pins.
+            tasks = zip(self.resource.dependencies, ids, strict=True)
+            return {"task_revision_ids": [item for ref, item in tasks if ref.kind == TASK.name]}
         return {}
 
 
@@ -1758,9 +1760,12 @@ def _files_from_definition(
             "initial_state",
             "expected",
             "seat_instructions",
+            "competitive",
         ):
             if key in definition and not _is_default(TaskManifest, key, definition[key]):
                 manifest[key] = definition[key]
+        if definition.get("party_size") is not None:
+            manifest["party"] = definition["party_size"]
         if resources:
             manifest["resources"] = sorted(resources)
         TaskManifest.model_validate(manifest)

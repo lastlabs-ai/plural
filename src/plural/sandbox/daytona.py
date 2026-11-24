@@ -39,8 +39,8 @@ from plural.sandbox.models import (
 )
 from plural.sandbox.sweep import EXECUTION_LABEL, OWNER_LABEL, TRIAL_LABEL
 
-APP_USER = "plural-apps"
-AGENT_USER = "plural-agent"
+APP_USER = "apphost"
+AGENT_USER = "agent"
 _CREATE_USERS = f"""set -e
 id -u {APP_USER} >/dev/null 2>&1 || useradd --system --user-group --no-create-home \\
     --home-dir /nonexistent --shell /usr/sbin/nologin {APP_USER}
@@ -58,7 +58,7 @@ _MAKE_WORKSPACE = (
     '{ sudo -n mkdir -p /workspace && sudo -n chown "$(id -u):$(id -g)" /workspace; } || true'
 )
 _OPEN_WORKSPACE = 'for path in "$@"; do mkdir -p "$path" && chmod -R a+rwX "$path"; done'
-SEAT_USER = "plural-seat-{index}"
+SEAT_USER = "seat-{index}"
 _CREATE_SEAT_USERS = """set -e
 for name in "$@"; do
     id -u "$name" >/dev/null 2>&1 || useradd --user-group --create-home --shell /bin/sh "$name"
@@ -539,8 +539,9 @@ class DaytonaProvider(SandboxProvider):
         """Create an App host user and an unprivileged Harness user.
 
         Daytona's default user can ``sudo``, so a Harness running as it could
-        read anything. Here the Harness runs as ``plural-agent``, which cannot,
-        and the App host as ``plural-apps``.
+        read anything. Here the Harness runs as ``agent``, which cannot, and the
+        App host as ``apphost``: names that say nothing about Plural to an Agent
+        that runs ``whoami``.
 
         Returns:
             Both users, or no ``app_user`` when the image has no passwordless
@@ -780,6 +781,24 @@ class DaytonaProvider(SandboxProvider):
         """
         lister = getattr(self._client(), "list", None)
         return await lister(labels) if lister is not None else ()
+
+    async def attach(self, sandbox_id: str) -> SandboxHandle:
+        """Reattach to a sandbox this account owns, such as a detached run's.
+
+        Returns:
+            A handle for it.
+
+        Raises:
+            CapabilityError: When this client cannot reach a sandbox by id.
+        """
+        getter = getattr(self._client(), "get", None)
+        if getter is None:
+            raise CapabilityError("this Daytona client cannot reach sandboxes by id")
+        remote = await getter(sandbox_id)
+        self._sandboxes[sandbox_id] = remote
+        return SandboxHandle(
+            sandbox_id=sandbox_id, provider=self.name, image_identity=remote.image_identity
+        )
 
     async def delete_sandbox(self, sandbox_id: str) -> None:
         """Delete a Daytona sandbox by id, even one another process created.

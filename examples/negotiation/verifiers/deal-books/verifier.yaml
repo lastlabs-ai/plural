@@ -1,0 +1,21 @@
+# Verifier: each seat's surplus, after every offer and at the end.
+# measure returns each seat's own value, so a party Trial charts one series per seat.
+# check scores each seat by its share of what the deal made possible.
+name: deal-books
+version: 1.0.0
+kind: deterministic
+check: verify.py:check
+measure: verify.py:measure
+metrics:
+  - name: surplus_usd
+    kind: running
+    unit: USD
+    aggregate: final
+    seat_aggregate: sum
+    description: >-
+      Each seat's surplus at the offer on the table, then at the deal: the buyer's value
+      less the price, or the price less the seller's cost. The episode's value is both
+      seats' together, what the deal created.
+  - name: deal
+    kind: binary
+    description: 1 when the two sides agreed a price.

@@ -205,6 +205,7 @@ def episode_to_messages(records: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     requested: list[Mapping[str, Any]] = []
     tail: list[dict[str, Any]] = []
     last_call: dict[str, Any] | None = None
+    compacted = False
     for record in ordered:
         kind = record.get("kind")
         if kind == "model.call":
@@ -213,7 +214,14 @@ def episode_to_messages(records: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
             requested = [*requested[:offset], *delta]
             last_call = record
             tail = []
-        elif kind in {"environment.step", "agent.finish"} and last_call is not None:
+        elif kind == "context.compaction":
+            # The Harness compacted its context: what it holds now replaces the
+            # last request, which already ended with the last reply and results.
+            requested = [item for item in record.get("messages") or [] if isinstance(item, Mapping)]
+            last_call = None
+            compacted = True
+            tail = []
+        elif kind in {"environment.step", "agent.finish"} and (last_call is not None or compacted):
             tail.append(record)
     names: dict[str, str] = {}
     messages: list[dict[str, Any]] = []
@@ -233,7 +241,11 @@ def episode_to_messages(records: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
                 last_call.get("text"), last_call.get("reasoning"), last_call.get("tool_calls")
             )
         )
+    if last_call is not None or compacted:
         for record in tail:
+            if record.get("implicit"):
+                add({"role": "user", "content": f"(You waited.)\n{_step_content(record)}"})
+                continue
             call_id = str(record.get("tool_call_id") or "")
             finish = "finish" if record.get("kind") == "agent.finish" else ""
             name = str(record.get("action") or finish) or names.get(call_id, "")

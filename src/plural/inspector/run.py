@@ -11,6 +11,7 @@ saved beside the inspected Job.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
@@ -122,6 +123,47 @@ def fork_key(
     finally:
         with suppress(Exception):
             studio.jobs.end_inspection_key(job_id)
+
+
+INSPECTING_FILE = "inspecting.json"
+
+
+@contextmanager
+def one_inspection(job_directory: Path) -> Iterator[None]:
+    """Hold a Job's inspection lock while inspecting it.
+
+    Starting an inspection revokes any other fork key for the same Job, and ending
+    one revokes them all, so two at once would cut off each other's forks.
+
+    Raises:
+        ProjectError: When a live process is already inspecting the Job.
+    """
+    lock = job_directory / INSPECTING_FILE
+    if lock.is_file():
+        try:
+            holder = int(json.loads(lock.read_text("utf-8"))["pid"])
+        except (OSError, ValueError, KeyError, TypeError):
+            holder = 0
+        if holder and holder != os.getpid() and _alive(holder):
+            raise ProjectError(
+                f"Job {job_directory.name} is already being inspected, by process {holder}. "
+                "Wait for it to finish: two inspections of one Job cut off each other's forks."
+            )
+    lock.write_text(json.dumps({"pid": os.getpid(), "started_at": now().isoformat()}), "utf-8")
+    try:
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def fork_environ(environ: Mapping[str, str], key: str | None) -> dict[str, str]:
@@ -341,7 +383,10 @@ def inspect_job(
     evidence = JobEvidence(project.project.root, job_id)
     trials = failed_trials(evidence, trial_ids)
     reference = hosted_job_id(project, job_id) or job_id
-    with fork_key(studio if depth != "quick" else None, reference) as key:
+    with (
+        one_inspection(evidence.directory),
+        fork_key(studio if depth != "quick" else None, reference) as key,
+    ):
         run = run_inspector(
             project,
             trials,

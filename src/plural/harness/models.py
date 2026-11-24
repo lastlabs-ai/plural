@@ -22,6 +22,7 @@ from pydantic import (
 
 from plural._deprecation import renamed_attribute, renamed_keys, warn_renamed
 from plural.common import (
+    ContextStrategy,
     FileDeclaration,
     FrozenModel,
     HarnessCapability,
@@ -83,6 +84,13 @@ class HarnessDefinition(FrozenModel):
         description=(
             "Whether the Harness reads HarnessEnvironment.resume and continues a history "
             "as its own conversation."
+        ),
+    )
+    context_strategies: tuple[ContextStrategy, ...] = Field(
+        default=(),
+        description=(
+            "The context policies the Harness's loop carries out: window, summarize, "
+            "none. An Agent chooses one in harness_config.context; empty, it may set none."
         ),
     )
 
@@ -176,6 +184,7 @@ class HarnessDefinition(FrozenModel):
             readme=self.readme,
             tools=self.tools,
             supports_resume=self.supports_resume,
+            context_strategies=self.context_strategies,
         )
 
     @classmethod
@@ -214,6 +223,7 @@ class HarnessDefinition(FrozenModel):
             readme=protocol.readme,
             tools=protocol.tools,
             supports_resume=protocol.supports_resume,
+            context_strategies=protocol.context_strategies,
         )
 
     def _source(self) -> PackageSource:
@@ -298,6 +308,20 @@ class Harness(BaseModel, ABC):
 
         Returns:
             The tools; none by default.
+        """
+        return ()
+
+    @classmethod
+    def context_strategies(cls) -> tuple[ContextStrategy, ...]:
+        """The context policies this Harness's loop carries out.
+
+        Override to declare the ones :meth:`run` honors, reading the Agent's choice
+        from ``agent.context``: ``window``, ``summarize``, or ``none``. An Agent
+        chooses one in ``harness_config.context``, and validation refuses one the
+        Harness doesn't declare, rather than let it be ignored.
+
+        Returns:
+            The strategies; none by default, so an Agent may set no context policy.
         """
         return ()
 
@@ -413,6 +437,7 @@ class Harness(BaseModel, ABC):
             readme=type(self).readme,
             tools=tuple(HarnessTool.model_validate(item) for item in type(self).tools()),
             supports_resume=type(self).supports_resume,
+            context_strategies=tuple(type(self).context_strategies()),
         )
         source = PackageSource(
             kind="local", uri=str(self._package_root), digest=digest, trusted=True

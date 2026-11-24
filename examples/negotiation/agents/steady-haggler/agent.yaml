@@ -1,0 +1,7 @@
+# Agent: the Benchmark's fixed opponent. Its Harness follows a concession schedule and
+# calls no model, so every run meets the same opponent at no cost.
+name: steady-haggler
+version: 1.0.0
+model: openai/gpt-5.6-luna
+harness: steady-haggler
+auth: none

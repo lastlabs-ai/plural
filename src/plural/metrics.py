@@ -36,12 +36,13 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from plural.common import FrozenModel
 
 MetricKind = Literal["binary", "score", "number", "rating", "running"]
 Aggregate = Literal["final", "mean", "min", "max", "auc", "time_to"]
+SeatAggregate = Literal["mean", "sum", "min", "max"]
 Direction = Literal["higher", "lower"]
 MetricSource = Literal["agent", "environment"]
 
@@ -118,6 +119,10 @@ class MetricSpec(FrozenModel):
     ``== 1``, or ``between 1 5``), which a non-binary gate needs. A ``target``
     on a metric that is not a gate is reported, never judged.
 
+    A running metric a ``measure`` hook gives per seat has a series per seat,
+    each aggregated on its own and judged as a gate on its own; the Trial's
+    value combines the seats' by ``seat_aggregate`` (by default their mean).
+
     Examples:
         >>> MetricSpec(name="price_correct", kind="binary").range
         (0.0, 1.0)
@@ -135,6 +140,15 @@ class MetricSpec(FrozenModel):
     gate: bool = False
     target: str | None = None
     description: str = ""
+    seat_aggregate: SeatAggregate | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        # Metrics without seats keep the form, and their Verifiers the hash, they had.
+        if isinstance(data, dict) and self.seat_aggregate is None:
+            data.pop("seat_aggregate", None)
+        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -182,6 +196,10 @@ class MetricSpec(FrozenModel):
                 parse_target(self.target)
             except ValueError as exc:
                 raise ValueError(f"metric {self.name!r}: {exc}") from None
+        if self.seat_aggregate is not None and self.kind != "running":
+            raise ValueError(
+                f"only a running metric is measured per seat; {self.name!r} is {self.kind}"
+            )
         if self.gate and self.kind != "binary" and self.target is None:
             raise ValueError(
                 f"gate {self.name!r} is a {self.kind} metric, so it needs a target, "
@@ -451,6 +469,31 @@ def judge(specs: Iterable[MetricSpec], values: Mapping[str, float | None]) -> Tr
     return TrialGates(gates=verdicts, passed=all(verdicts.values()) if verdicts else None)
 
 
+def in_unit(value: float, unit: str | None, *, signed: bool = False) -> str:
+    """A measured value in its unit, as the report prints it.
+
+    Returns:
+        Dollars with a ``$``; any other unit after the number.
+
+    Examples:
+        >>> in_unit(3991.5, "USD"), in_unit(-12.5, "USD"), in_unit(250, "USD", signed=True)
+        ('$3,992', '-$12.5', '+$250')
+        >>> in_unit(0.66666, None), in_unit(42.0, "days")
+        ('0.667', '42 days')
+    """
+    sign = "-" if value < 0 else "+" if signed and value > 0 else ""
+    if unit == "USD":
+        return f"{sign}${_figure(abs(value))}"
+    number = sign + _figure(abs(value))
+    return f"{number} {unit}" if unit else number
+
+
+def _figure(value: float) -> str:
+    if abs(value) >= 1000:
+        return f"{value:,.0f}"
+    return f"{value:.3g}"
+
+
 class MetricAggregate(FrozenModel):
     """One metric across a set of Trials, such as one Agent's on a Benchmark.
 
@@ -574,6 +617,63 @@ def series_by_metric(
     return {name: sorted(items, key=lambda item: item[0]) for name, items in grouped.items()}
 
 
+def seat_series(
+    points: Iterable[Mapping[str, Any]],
+) -> dict[str, dict[str, list[tuple[int, float]]]]:
+    """Group ``metrics.jsonl`` lines' per-seat values into one series per seat and metric.
+
+    Returns:
+        Each seat's series, by metric, in step order.
+
+    Examples:
+        >>> lines = [{"step": 1, "seats": {"buyer": {"surplus": 3}, "seller": {"surplus": 1}}}]
+        >>> seat_series(lines)["seller"]
+        {'surplus': [(1, 1.0)]}
+    """
+    grouped: dict[str, dict[str, list[tuple[int, float]]]] = {}
+    for line in points:
+        seats = line.get("seats")
+        if not isinstance(seats, Mapping):
+            continue
+        for seat, values in seats.items():
+            if not isinstance(values, Mapping):
+                continue
+            for name, value in values.items():
+                if value is None:
+                    continue
+                try:
+                    point = (int(line.get("step") or 0), float(value))
+                except (TypeError, ValueError):
+                    continue
+                grouped.setdefault(str(seat), {}).setdefault(str(name), []).append(point)
+    return {
+        seat: {name: sorted(items, key=lambda item: item[0]) for name, items in metrics.items()}
+        for seat, metrics in grouped.items()
+    }
+
+
+def combine_seats(values: Iterable[float | None], how: SeatAggregate | None) -> float | None:
+    """One Trial value from each seat's value of a per-seat metric, leaving out ``None``.
+
+    Returns:
+        Their mean, sum, min, or max; ``None`` when no seat has a value.
+
+    Examples:
+        >>> combine_seats([3.0, None, 1.0], "sum"), combine_seats([3.0, 1.0], None)
+        (4.0, 2.0)
+    """
+    present = [float(value) for value in values if value is not None]
+    if not present:
+        return None
+    if how == "sum":
+        return math.fsum(present)
+    if how == "min":
+        return min(present)
+    if how == "max":
+        return max(present)
+    return math.fsum(present) / len(present)
+
+
 def store_metric_points(
     path: Path, verifier: str, version: str, points: Sequence[Mapping[str, Any]]
 ) -> int:
@@ -625,15 +725,19 @@ __all__ = [
     "MetricKind",
     "MetricSource",
     "MetricSpec",
+    "SeatAggregate",
     "TrialGates",
     "aggregate_metric",
     "aggregate_series",
     "builtin_values",
+    "combine_seats",
     "default_score",
+    "in_unit",
     "judge",
     "meets",
     "metric_failures",
     "parse_target",
+    "seat_series",
     "series_by_metric",
     "store_metric_points",
 ]

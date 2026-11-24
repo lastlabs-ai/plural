@@ -296,6 +296,42 @@ To have the calls observed instead, an organization admin can add the server und
 are recorded on the Trial with `billing="organization"` and a reference cost, and never
 draw on credits.
 
+## Keep a long episode in context
+
+A long episode outgrows any context window. A **context policy** says how the Agent's
+Harness keeps it within bounds. It is a Harness setting, so the Agent chooses one in
+`harness_config.context`:
+
+```yaml
+harness_config:
+  context:
+    strategy: summarize     # window, summarize, or none
+    max_tokens: 20000       # compact once the context is over this
+    keep_last_turns: 6      # the latest turns stay as they are
+    summary_instructions: >
+      Keep the standing orders, the supplier accounts, and what is still pending.
+```
+
+Each Harness lists the strategies it carries out, and validation refuses one it
+doesn't. Plural's native loop carries out `window`, `summarize`, and `none`. A
+built-in vendor Harness, such as `claude-code`, manages its own context, so it accepts
+only `none`. A custom Harness declares its own with `context_strategies()` or
+`context_strategies` in `harness.yaml`, and accepts none until it does. With no
+policy, the Harness keeps everything.
+
+An Agent written before the policy moved to the Harness, with `context:` at the top
+level, still loads: Plural reads it as `harness_config.context`, and the Agent keeps
+its hash.
+
+`window` drops the oldest turns; `summarize` replaces them with a summary the Agent's
+own model writes, billed to the Agent. Either way the instructions and the latest turns
+stay. `summary_instructions` says what a summary keeps; by default it keeps the task,
+the decisions made, and anything still pending. Each compaction is recorded in the
+episode, and a checkpoint holds the context as it stood, so a fork or a resumed Trial
+continues from the same context. When something the Agent needed was lost in a
+compaction, `plural job inspect` names the cause `context` and tests it with a fork,
+from before that compaction, whose context policy keeps what was lost.
+
 ## Change what a tool says
 
 An Environment's actions describe themselves, and every Agent reads the same

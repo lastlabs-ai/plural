@@ -855,6 +855,10 @@ For a Task whose Environment has a party, ``party`` lists the Agents that
 share each episode, in seat order; list one Agent more than once for
 self-play. Left out, every Agent in ``agents`` plays, once each.
 
+A Benchmark Job seats its party Tasks by the Benchmark's ``seatings``:
+each Agent in ``agents`` plays from every seat, with ``opponents``, the
+Benchmark's fixed opponents, in the others. Opponents are not ranked.
+
 ``episode_server`` says where the Job serves an external Agent's episodes;
 by default it listens on a free loopback port.
 
@@ -874,7 +878,7 @@ metrics its Task's Verifiers mark ``gate: true``, and whether it ``passed``.
 ```
 
 ```python
-plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, party: 'Sequence[Agent] | None' = None, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, credentials: 'Mapping[str, Mapping[str, str]] | None' = None, episode_server: 'Any' = None, allow_local_models: 'bool' = False, heldout: 'bool' = False, purpose: 'JobPurpose' = 'eval') -> 'None'
+plural.Job(source: 'Task | Benchmark', agents: 'Sequence[Agent]', *, party: 'Sequence[Agent] | None' = None, opponents: 'Sequence[Agent] | None' = None, mode: 'JobMode' = <JobMode.EVAL: 'eval'>, attempts: 'int' = 1, concurrency: "int | Literal['auto']" = 1, per_runtime_concurrency: 'int | None' = None, priority: 'int' = 0, retry: 'RetryPolicy | None' = None, provider: 'Any' = None, providers: 'Mapping[str, Any] | None' = None, registry: 'Any' = None, store: 'Any' = None, environ: 'Mapping[str, str] | None' = None, resource_resolvers: 'Mapping[str, Any] | None' = None, progress: 'Any' = None, project_policy: 'Any' = None, catalog: 'ModelCatalog | None' = None, client: 'Any' = None, api_key: 'str | None' = None, credentials: 'Mapping[str, Mapping[str, str]] | None' = None, episode_server: 'Any' = None, allow_local_models: 'bool' = False, heldout: 'bool' = False, purpose: 'JobPurpose' = 'eval') -> 'None'
 ```
 
 ### plural.Job.run_async
@@ -1516,7 +1520,7 @@ from the state of several Apps.
 ```
 
 ```python
-plural.Environment(*, apps: 'Iterable[App[Any]]' = (), runtime: 'EnvironmentRuntime | Mapping[str, Any] | None' = None, name: 'str | None' = None, version: 'str | None' = None, description: 'str | None' = None, overview: 'str | None' = None, readme: 'str | None' = None, resources: 'Iterable[EnvironmentResource]' = (), guardrails: 'Iterable[Guardrail]' = (), harness_policy: 'HarnessPolicy | None' = None, limits: 'ExecutionLimits | None' = None, party: 'Party | int | Mapping[str, int] | None' = None, metadata: 'dict[str, Any] | None' = None, source: 'str | Path | None' = None) -> 'None'
+plural.Environment(*, apps: 'Iterable[App[Any]]' = (), runtime: 'EnvironmentRuntime | Mapping[str, Any] | None' = None, name: 'str | None' = None, version: 'str | None' = None, description: 'str | None' = None, overview: 'str | None' = None, readme: 'str | None' = None, resources: 'Iterable[EnvironmentResource]' = (), guardrails: 'Iterable[Guardrail]' = (), harness_policy: 'HarnessPolicy | None' = None, limits: 'ExecutionLimits | None' = None, party: 'Party | int | Mapping[str, int] | None' = None, clock: 'Clock | Mapping[str, Any] | None' = None, horizon: 'Horizon | Mapping[str, Any] | None' = None, autonomous: 'bool | None' = None, allow_finish: 'bool | None' = None, checkpoint_every: 'Every | Mapping[str, Any] | None' = None, metadata: 'dict[str, Any] | None' = None, source: 'str | Path | None' = None) -> 'None'
 ```
 
 ### plural.Environment.on_step
@@ -1713,7 +1717,7 @@ zero-sum game.
 ```
 
 ```python
-plural.Step(task: 'StepTask', turn: 'int', app: 'str', action: 'str', arguments: 'Mapping[str, Any]', observation: 'Any' = None, error: 'str | None' = None, previous_state: 'Any' = None, current_state: 'Any' = None, apps: 'Mapping[str, Any]' = <factory>, seat: 'str | None' = None, seats: 'tuple[str, ...]' = (), source: "Literal['agent', 'environment']" = 'agent') -> None
+plural.Step(task: 'StepTask', turn: 'int', app: 'str', action: 'str', arguments: 'Mapping[str, Any]', observation: 'Any' = None, error: 'str | None' = None, previous_state: 'Any' = None, current_state: 'Any' = None, apps: 'Mapping[str, Any]' = <factory>, seat: 'str | None' = None, seats: 'tuple[str, ...]' = (), source: "Literal['agent', 'environment']" = 'agent', now: 'float | None' = None) -> None
 ```
 
 ## plural.environments.types.Observation
@@ -1871,6 +1875,24 @@ Agent was offered; a fork compares them with the tools a history used.
 
 Returns:
     The tools; none by default.
+```
+
+### plural.Harness.context_strategies
+
+```python
+context_strategies() -> 'tuple[ContextStrategy, ...]'
+```
+
+The context policies this Harness's loop carries out.
+
+```text
+Override to declare the ones :meth:`run` honors, reading the Agent's choice
+from ``agent.context``: ``window``, ``summarize``, or ``none``. An Agent
+chooses one in ``harness_config.context``, and validation refuses one the
+Harness doesn't declare, rather than let it be ignored.
+
+Returns:
+    The strategies; none by default, so an Agent may set no context policy.
 ```
 
 ### plural.Harness.run
@@ -2661,6 +2683,19 @@ delete_sandbox(self, sandbox_id: 'str') -> 'None'
 
 Delete a sandbox by id, including one this process did not create.
 
+### plural.sandbox.SandboxProvider.attach
+
+```python
+attach(self, sandbox_id: 'str') -> 'SandboxHandle'
+```
+
+Reach a sandbox by id that another process created, such as a detached run's.
+
+```text
+Returns:
+    A handle this provider can run commands and download files with.
+```
+
 ## plural.sandbox.SandboxRequirements
 
 Controls required for one sandbox before it may launch.
@@ -3044,8 +3079,9 @@ Create an App host user and an unprivileged Harness user.
 
 ```text
 Daytona's default user can ``sudo``, so a Harness running as it could
-read anything. Here the Harness runs as ``plural-agent``, which cannot,
-and the App host as ``plural-apps``.
+read anything. Here the Harness runs as ``agent``, which cannot, and the
+App host as ``apphost``: names that say nothing about Plural to an Agent
+that runs ``whoami``.
 
 Returns:
     Both users, or no ``app_user`` when the image has no passwordless
@@ -3198,6 +3234,22 @@ This account's Daytona sandboxes that carry every label given.
 ```text
 Returns:
     One summary per sandbox; empty when the client cannot list.
+```
+
+### plural.sandbox.DaytonaProvider.attach
+
+```python
+attach(self, sandbox_id: 'str') -> 'SandboxHandle'
+```
+
+Reattach to a sandbox this account owns, such as a detached run's.
+
+```text
+Returns:
+    A handle for it.
+
+Raises:
+    CapabilityError: When this client cannot reach a sandbox by id.
 ```
 
 ### plural.sandbox.DaytonaProvider.delete_sandbox

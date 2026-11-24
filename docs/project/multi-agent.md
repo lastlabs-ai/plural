@@ -252,11 +252,66 @@ with `Job(task, agents, party=[...])`.
 Each Agent is ranked by the mean of the scores of the seats it played. A Trial result
 lists `seats`: each seat's Agent, score, step reward total, steps, and trace.
 
-:::details Can I put a party in a Benchmark?
-Not yet: Benchmarks for several Agents are coming soon. Until then a Benchmark refuses
-a Task with a party, whichever way its seats are kept apart. Compare parties by running
-the Task in a Job, which ranks each Agent as above.
-:::
+## Put a party in a Benchmark
+
+A Benchmark ranks every Agent on the same game, so a Task with a party says how many
+play and whether they play against each other:
+
+```yaml
+# tasks/bike-deal/task.yaml
+environment: market
+party_size: 2     # pinned: every Agent is ranked at a table of two
+competitive: true # the seats play against each other
+```
+
+`party_size` is the same name in `task.yaml`, the API, and the hosted Task page. A
+Benchmark refuses a party Task without it. Run alone with `plural run -t`, it
+refuses one too; run it through the Benchmark.
+
+The Benchmark decides who fills the other seats:
+
+```yaml
+# benchmarks/negotiation/benchmark.yaml
+tasks: [bike-deal, camera-deal]
+opponents: [steady-haggler@1.0.0]
+seatings: rotate
+primary_metric: surplus_usd
+```
+
+- **`opponents`** are Agents of the project, pinned to a version, that fill every seat
+  but the ranked Agent's, in order and repeated if there are too few. Fixing them keeps
+  scores comparable from run to run. They play in the Job, and their results are
+  reported, labeled as fixed opponents, after the ranked Agents. An Agent can't be both
+  ranked and an opponent.
+- **`seatings: rotate`**, the default, plays each Task once from every seat for every
+  attempt, so a game with a first-mover advantage is fair. `fixed` plays it from
+  `seat_1` only.
+- A **competitive** Task needs opponents, and refuses a party whose isolation is
+  `shared`, because each seat could read the others' files and act for them.
+- A **cooperative** Task, without `competitive`, may leave `opponents` out: the ranked
+  Agent then fills every seat and plays with copies of itself.
+
+```bash
+plural run --benchmark negotiation -a negotiator --budget-usd 2
+```
+
+An Agent's score is the mean of the scores of the seats it played. The result breaks it
+down by seat, so an Agent that wins only as the buyer shows it:
+
+```text
+negotiator: score 0.15 (95% 0.04 to 0.30), success rate 12%, pass^4 0%, over 2 Tasks
+  as seat_1: score 0.20, surplus_usd 62.00 (4 Trials)
+  as seat_2: score 0.10, surplus_usd 30.00 (4 Trials)
+steady-haggler: fixed opponent: score 0.85 (95% 0.67 to 0.96), ...
+```
+
+A running metric a Verifier's `measure` gives per seat, as a mapping of seat to value,
+has a series for each seat. Each seat's series is aggregated, and judged as a gate, on
+its own; `seat_aggregate` (`mean`, `sum`, `min`, or `max`) combines them into the
+Trial's value. An Agent's pass rate counts each seat it played once: by that seat's
+own gates when one applied to it, and otherwise by the Trial's. Each seat's line shows
+its pass rate when it was judged, and the hosted Job page keeps each seat's gates. The
+`negotiation` example has a competitive Benchmark and a cooperative one.
 
 ## What each seat sees, and what it cannot
 

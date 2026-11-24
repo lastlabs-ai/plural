@@ -121,6 +121,12 @@ class Checkpoint(BaseModel):
     """The original's steps 1 to ``step``, as its host recorded them, with rewards."""
     prefix_states: list[dict[str, Any]] = Field(default_factory=list)
     prefix_metrics: list[dict[str, Any]] = Field(default_factory=list)
+    clock: dict[str, Any] | None = None
+    """The Environment clock after step *k*: the time, when it last measured,
+    and each App's scheduled events. ``None`` without a clock."""
+    personas: list[dict[str, Any]] = Field(default_factory=list)
+    """Every persona call the Trial recorded, so a call asked again the same way
+    after the checkpoint replays its answer."""
 
     @model_serializer(mode="wrap")
     def _omit_no_volume(self, handler: SerializerFunctionWrapHandler) -> Any:
@@ -128,6 +134,10 @@ class Checkpoint(BaseModel):
         # Without a Volume, a checkpoint and a Task built from one hash as before.
         if isinstance(data, dict) and self.volume is None:
             data.pop("volume", None)
+        if isinstance(data, dict) and self.clock is None:
+            data.pop("clock", None)
+        if isinstance(data, dict) and not self.personas:
+            data.pop("personas", None)
         return data
 
     @property
@@ -170,6 +180,8 @@ class Checkpoint(BaseModel):
             "elapsed": self.elapsed,
             "observation": self.observation,
             "rendered": self.rendered,
+            **({"clock": self.clock} if self.clock is not None else {}),
+            **({"personas": self.personas} if self.personas else {}),
         }
 
 
@@ -203,6 +215,34 @@ def world_at(
         if isinstance(rng, Mapping):
             generators.update(rng)
     return current, generators, initial
+
+
+def clock_at(states: Iterable[Mapping[str, Any]], step: int) -> dict[str, Any] | None:
+    """Fold ``states.jsonl``'s clock entries up to ``step``.
+
+    Each line holds the time, and only the Apps whose scheduled events changed.
+
+    Returns:
+        The clock after step ``step``, or ``None`` when the Environment has none.
+    """
+    clock: dict[str, Any] | None = None
+    scheduled: dict[str, Any] = {}
+    for line in sorted(
+        (item for item in states if isinstance(item.get("step"), int)),
+        key=lambda item: int(item["step"]),
+    ):
+        if int(line["step"]) > step or not isinstance(line.get("clock"), Mapping):
+            continue
+        entry = line["clock"]
+        changed = entry.get("scheduled")
+        if isinstance(changed, Mapping):
+            scheduled.update(changed)
+        clock = {
+            "now": entry.get("now"),
+            "measured_at": entry.get("measured_at"),
+            "scheduled": dict(scheduled),
+        }
+    return clock
 
 
 def opening_of(states: Iterable[Mapping[str, Any]]) -> tuple[Any, str]:
@@ -363,7 +403,13 @@ def context_at(
         if any(item.get("kind") == "model.call" for item in kept):
             messages = _answered(episode_to_messages(kept)["messages"])
             turn = sum(1 for item in kept if item.get("kind") == "model.call")
-            return AgentContext(messages=messages, turn=turn, tools_used=tools, source="recorded")
+            return AgentContext(
+                messages=messages,
+                turn=turn,
+                tools_used=tools,
+                source="recorded",
+                compaction=_compactions(kept),
+            )
     turns = {item.get("turn") for item in prefix if isinstance(item.get("turn"), int)}
     return AgentContext(
         messages=messages_from_steps(instructions, prefix, opening),
@@ -371,6 +417,36 @@ def context_at(
         tools_used=tools,
         source="reported" if reported else "steps",
     )
+
+
+def _compactions(records: Sequence[Mapping[str, Any]]) -> list[Any] | None:
+    """Each compaction of the Agent's context in ``records``, with what it started from.
+
+    Each entry has the compaction's turn, strategy, and messages dropped, and
+    ``opening``: the instructions and Task the episode's first model call was
+    sent, which a ``context`` change can put back.
+
+    Returns:
+        The compactions, or ``None`` when the context was never compacted.
+    """
+    first = next((item for item in records if item.get("kind") == "model.call"), None)
+    opening: list[dict[str, Any]] = []
+    for message in (first or {}).get("messages") or ():
+        if not isinstance(message, Mapping) or message.get("role") == "assistant":
+            break
+        opening.append(dict(message))
+    compactions = [
+        {
+            "turn": item.get("turn"),
+            "strategy": item.get("strategy"),
+            "dropped_messages": item.get("dropped_messages"),
+            "summary": item.get("summary"),
+            "opening": opening,
+        }
+        for item in records
+        if item.get("kind") == "context.compaction"
+    ]
+    return compactions or None
 
 
 def transcript_text(context: AgentContext, *, limit: int = 4_000) -> str:
@@ -554,6 +630,12 @@ def build_checkpoint(
             line for line in states if isinstance(line.get("step"), int) and line["step"] <= step
         ],
         prefix_metrics=metrics,
+        clock=clock_at(states, step),
+        personas=[
+            item
+            for item in _read_jsonl(artifacts / "personas.jsonl")
+            if item.get("mode") in {"live", "scripted", "replayed"}
+        ],
     )
 
 

@@ -159,8 +159,19 @@ revision, and changed content gets the next revision number; you never bump
 Benchmark from Python, load it with `Workspace(Project.find()).get("benchmark",
 "support-triage")` from `plural.project`.
 
-`primary_metric` is `score`, the correctness score written by each Task's Verifiers,
-and it is the only value it accepts. A Benchmark always ranks on that score.
+`primary_metric` is what the Benchmark ranks Agents on. It defaults to `score`, the
+correctness score written by each Task's Verifiers, and it can name any metric one of
+its Verifiers declares instead, such as a dollar amount:
+
+```yaml
+primary_metric: net_worth_usd
+```
+
+A named metric ranks on its mean over the Trials it applied to, in the metric's
+`direction`: higher first unless it says `lower`. It need not lie between 0 and 1, and
+reports and leaderboards show it in its `unit`. The score is still computed and shown
+beside it, and `scoring` still decides how failures count toward the score. The
+vending-sim tutorial's `vending-quarter` Benchmark ranks on net worth in dollars.
 
 ### How failures are scored
 
@@ -279,7 +290,7 @@ took, and what it cost. Read them together. An overall average hides the tradeof
 Correctness is the Verifier score. For a support ticket, that is usually 1 when the
 Agent assigned the right category, drafted a reply, and resolved the ticket, and 0
 otherwise. The Benchmark ranks Agents on `primary_metric`, which defaults to this
-score.
+score and can name another metric.
 
 A Trial can finish running and still score 0. Completing the run is not the same as
 doing the work correctly.

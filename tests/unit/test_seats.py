@@ -566,12 +566,13 @@ def test_a_party_refuses_the_local_runtime() -> None:
 
 
 @pytest.mark.parametrize("isolation", ["isolated", "shared"])
-def test_a_benchmark_refuses_a_party_until_benchmarks_for_several_agents_ship(
-    isolation: str,
-) -> None:
+def test_a_benchmark_takes_a_party_task_once_it_pins_its_size(isolation: str) -> None:
     task = _seated_task(_scored_one, Party(min=2, max=2, isolation=isolation))
-    with pytest.raises(ValueError, match="coming soon"):
+    with pytest.raises(ValueError, match="must pin its party size"):
         BenchmarkDefinition(name="poker", tasks=(task,))
+    pinned = task.model_copy(update={"party_size": 2})
+    benchmark = BenchmarkDefinition(name="poker", tasks=(pinned,))
+    assert benchmark.seatings == "rotate"
 
 
 async def test_a_shared_party_plays_as_one_user_and_says_so(tmp_path: Path) -> None:
@@ -599,7 +600,7 @@ async def test_a_shared_party_plays_as_one_user_and_says_so(tmp_path: Path) -> N
     assert trial.status == "succeeded", trial.error_message
     assert trial.seat_isolation == "none"
     assert not provider.asked_for_users
-    assert set(provider.seat_user.values()) == {"plural-agent"}
+    assert set(provider.seat_user.values()) == {"agent"}
 
 
 def test_a_party_refuses_apps_that_need_agent_credentials() -> None:
@@ -660,3 +661,44 @@ def test_a_custom_harness_waits_for_its_turn_and_sees_only_its_view(tmp_path: Pa
     assert not alone.seated
     with pytest.raises(RuntimeError, match="no party"):
         alone.turn()
+
+
+def test_an_agent_is_judged_by_each_seat_it_played() -> None:
+    from types import SimpleNamespace
+
+    from plural.execution.engine import _seat_aggregates, _verdicts
+    from plural.jobs import SeatResult
+
+    def seat(name: str, digest: str, passed: bool | None, gates: dict[str, bool]) -> SeatResult:
+        return SeatResult(
+            seat=name,
+            agent_id=digest,
+            agent_name=digest,
+            agent_digest=digest,
+            score=1.0 if passed else 0.0,
+            step_reward_total=0.0,
+            steps=1,
+            artifact_root=f"seats/{name}",
+            gates=gates,
+            passed=passed,
+        )
+
+    def trial(passed: bool | None, *seats: SeatResult) -> Any:
+        return SimpleNamespace(passed=passed, seats=seats, receipt=None)
+
+    won = trial(
+        True,
+        seat("seat_1", "a", True, {"surplus": True}),
+        seat("seat_2", "b", False, {"surplus": False}),
+    )
+    unjudged = trial(False, seat("seat_1", "b", None, {}), seat("seat_2", "a", None, {}))
+    assert _verdicts(won, "a") == [True]
+    assert _verdicts(won, "b") == [False]
+    assert _verdicts(unjudged, "a") == [False]
+
+    rows = _seat_aggregates([won, unjudged], "a")
+    assert list(rows) == ["seat_1", "seat_2"]
+    assert rows["seat_1"].pass_rate == 1.0
+    assert rows["seat_1"].gates == {"surplus": 1.0}
+    assert rows["seat_2"].pass_rate == 0.0
+    assert rows["seat_2"].gates == {}

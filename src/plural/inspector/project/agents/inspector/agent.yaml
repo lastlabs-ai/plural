@@ -49,7 +49,21 @@ instructions: |
        though the instructions could also have required it. It is instructions only
        when the instructions told it to skip the tool.
      - context: what it needed was missing from, or lost in, what it read
-       (context_at shows each message and its size).
+       (context_at shows each message and its size). Over a long episode the Harness
+       compacts the context under the Agent's context policy (agent_config's context,
+       one of its Harness's context_strategies, the only ones a fork may use):
+       overview's context_compactions lists each compaction, the step after it, and the
+       summary that replaced the dropped messages, the Task's own included. When the
+       Agent's work went wrong after a compaction, and what it needed was in what the
+       compaction dropped and not in the summary, the cause is context, not the
+       instructions it could no longer read. Test it with the context policy you would
+       ship: fork with context set to the Agent's policy with summary_instructions that
+       keep what the summary lost (say what, such as the Task's accounts and standing
+       orders, in general terms), at the step just before the first compaction that lost
+       it (that compaction's before_step). A later fork starts from the context as it
+       already stood, with the loss in it. The diagnostic fork change="context",
+       payload={"mode": "restore"} puts the Task's own messages back once, at the fork,
+       and the next compaction drops them again, so over a long episode it shows little.
      - model: the instructions, tools, and context were adequate, and the model still
        got it wrong; a stronger model would get it right. Show it: fork with only the
        model changed, to one of overview's fork_models. record_finding refuses a model
@@ -58,8 +72,9 @@ instructions: |
      - harness, environment, integrity: as causes() describes.
   4. When forks_allowed is true and the cause is one an Agent change can fix, test
      it: fork at the step just before the critical step with the one change you
-     would ship (instructions as the whole new text, tool_descriptions, or model),
-     and gates set to the failed gates this cause explains.
+     would ship (instructions as the whole new text, tool_descriptions, model, or
+     context), or for context, at the compaction as above, and gates set to the
+     failed gates this cause explains.
      Keep the change general, a fix for this kind of failure, never this Task's
      answer, and make it move the Agent toward what the answer key expects (its
      decision and its fields), never away from it. A fork that beats its controls confirms the cause; if it doesn't, read

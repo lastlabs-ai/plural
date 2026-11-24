@@ -204,7 +204,7 @@ class HarnessRunner:
             )
             stdin = None
         if private:
-            command = ("sh", "-c", 'umask 077; exec "$@"', "plural-seat", *command)
+            command = ("sh", "-c", 'umask 077; exec "$@"', "seat", *command)
         run_env = dict(env or {})
         tools = f"{request.workspace.rstrip('/')}/.plural/tools/bin"
         path_value = run_env.get("PATH") or os.environ.get("PATH") or "/usr/local/bin:/usr/bin:/bin"

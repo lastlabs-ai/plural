@@ -93,9 +93,13 @@ for a second cause, often a wrong answer key, and must record it before it finis
 
 The **status** is computed, never chosen by the model. A Finding is `confirmed` when a
 fork with its remedy passed more often than the controls, with an interval that
-excludes zero; `refuted` when its forks decided and none did; a fork judged on other
-gates than the Finding's tested something else and doesn't count; `inconclusive` when
-they had too few Trials to decide; and `inferred` when nothing was forked. A fork
+excludes zero; `refuted` when its forks decided against it, with an interval that
+rules out any improvement; a fork judged on other gates than the Finding's tested
+something else and doesn't count; `inconclusive` when they had too few Trials to
+decide, or an interval that still allows an improvement (two passes in four against
+none in four is `inconclusive`, not `refuted`); and `inferred` when nothing was forked.
+A confirmed Finding's remedy is the one its winning fork tested: the Inspector can't
+record a different change under it, so `plural agent revise` ships what was proven. A fork
 changes the Agent, so it can't confirm a cause outside the Agent: a `grader` or `task`
 Finding is always `inferred`, and its evidence is what supports it.
 
@@ -162,7 +166,8 @@ The Inspector reads three optional files in your project's `inspector/` folder:
   ```
 
   Built in: `unknown_action`, `action_error`, `repeated_action`, `unused_tool`,
-  `failed_gate`, `stop_reason`, and `large_context`. A signal that raises is reported
+  `failed_gate`, `stop_reason`, `large_context`, `context_compacted`, and
+  `errors_after_compaction`. A signal that raises is reported
   as `signal_failed`, never fatal.
 - **`causes.yaml`**: cause dimensions of your own, each with a description and whether
   a change to the Agent can fix it.
@@ -193,10 +198,22 @@ plural agent revise quote-bot --from-finding F1
 `revise` applies a **confirmed** Finding's remedy to `agents/quote-bot/agent.yaml`,
 raises its minor version, and adds an entry to `CHANGELOG.md` beside it: the Finding,
 what changed, its evidence, and the forks that confirmed it, with their counts. A
-remedy can change the instructions, the model, the Harness config, or a tool's
+remedy can change the instructions, the model, the Harness config, including its
+[context policy](../project/agents.md#keep-a-long-episode-in-context), or a tool's
 description in [`tool_overrides`](../project/agents.md#change-what-a-tool-says). The
 comments at the top of `agent.yaml` are kept. `--job` picks the inspected Job when
 several hold an `F1`.
+
+A remedy changes the Agent for every Task, so the Inspector can't propose one that
+names the Task's own world: an account, a customer, a supplier, an item, or a value
+from its answer key. Those are the members of the App State's collections, the values
+of its fields that name something (a customer, a SKU, an id), and identifier-shaped
+strings, plus whatever the Task's author wrote into its initial State, info, and
+answer key unless every other development Task in the Job has it too. A name the
+Agent or the Environment's tools already mention is part of the Agent's interface
+and is allowed. Both a fork's remedy and a Finding's are checked, so a fix that only
+works because it names this world is never tested or shipped: describe the kind of
+thing instead, such as "every supplier account in the instructions".
 
 It refuses a Finding that isn't confirmed, and one whose cause a change to the Agent
 can't fix, such as `grader`. An [External Agent](../project/external-agents.md) runs as

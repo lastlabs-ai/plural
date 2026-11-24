@@ -35,10 +35,12 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [BenchmarkScoring](#benchmarkscoring)
 - [Checkpoint](#checkpoint)
 - [CheckpointWorkspace](#checkpointworkspace)
+- [Clock](#clock)
 - [DeclarativeImage](#declarativeimage)
 - [Resource](#resource)
 - [Runtime](#runtime)
 - [EvaluationTrack](#evaluationtrack)
+- [Every](#every)
 - [ExecutionLimits](#executionlimits)
 - [ExecutionTarget](#executiontarget)
 - [ExternalAgent](#externalagent)
@@ -48,6 +50,7 @@ For Python-authored Environments, `runtime` is a required Environment parameter.
 - [HarnessDefinition](#harnessdefinition)
 - [HarnessPolicy](#harnesspolicy)
 - [HarnessTool](#harnesstool)
+- [Horizon](#horizon)
 - [MetricSpec](#metricspec)
 - [NetworkMode](#networkmode)
 - [Party](#party)
@@ -78,6 +81,11 @@ Schema-v2 Environment: Apps composed with one Runtime and one set of limits.
 - **`harness_policy`** — `HarnessPolicy`; optional.
 - **`limits`** — `ExecutionLimits`; optional.
 - **`party`** — `Party | null`; optional. Default: `null`. How many Agents share each episode, for a game such as poker. Leave it unset for an Environment one Agent works in alone.
+- **`clock`** — `Clock | null`; optional. Default: `null`. Simulated time. With a clock the Environment offers a wait action, its Apps' scheduled events happen as time passes, and each observation starts with the time.
+- **`horizon`** — `Horizon | null`; optional. Default: `null`. When the episode ends on its own: after sim_time clock units or max_steps steps, with stop reason horizon_reached.
+- **`autonomous`** — `boolean`; optional. Default: `false`. The Agent runs until the horizon: a reply with no tool call waits rather than ending the episode. Needs a clock.
+- **`allow_finish`** — `boolean | null`; optional. Default: `null`. Whether the Agent may end the episode itself. Unset, it may unless the Environment is autonomous.
+- **`checkpoint_every`** — `Every | null`; optional. Default: `null`. How often the Job saves a run checkpoint, every sim_time clock units or steps steps, so a Trial whose runner dies can be resumed.
 - **`metadata`** — `object`; optional.
 
 ## Harness
@@ -102,6 +110,8 @@ One versioned unit of work in a Python-authored Environment.
 - **`resources`** — `array of Resource`; optional. Default: `[]`.
 - **`initial_state`** — `object`; optional.
 - **`seat_instructions`** — `object`; optional.
+- **`party_size`** — `integer | null`; optional. Default: `null`.
+- **`competitive`** — `boolean`; optional. Default: `false`.
 - **`expected`** — `JSON value`; optional. Default: `null`.
 - **`from_checkpoint`** — `string | null`; optional. Default: `null`.
 - **`checkpoint`** — `Checkpoint | null`; optional. Default: `null`.
@@ -124,6 +134,7 @@ Code that verifies an episode: it scores the end, rewards actions, or both.
 - **`reward`** — `JSON value`; optional. Default: `null`.
 - **`hindsight`** — `JSON value`; optional. Default: `null`.
 - **`measure`** — `JSON value`; optional. Default: `null`.
+- **`measure_every`** — `Every | null`; optional. Default: `null`.
 - **`runtime`** — `VerifierRuntime`; optional.
 - **`result_path`** — `string`; optional. Default: `"verifier-result.json"`.
 - **`evidence_required`** — `boolean`; optional. Default: `true`.
@@ -176,7 +187,7 @@ A catalog-backed model and its optional execution harness.
 - **`temperature`** — `number | null`; optional. Default: `null`.
 - **`max_tokens`** — `integer | null`; optional. Default: `null`.
 - **`harness`** — `HarnessDefinition | Harness | string | null`; optional. Default: `null`.
-- **`harness_config`** — `object`; optional. Options for the Agent's Harness. A built-in Harness validates them; a custom one reads them in self.config, over its own config.
+- **`harness_config`** — `object`; optional. Options for the Agent's Harness. A built-in Harness validates them; a custom one reads them in self.config, over its own config. context chooses one of the Harness's context strategies: {strategy: window | summarize | none, max_tokens, keep_last_turns}.
 - **`auth`** — `"environment" | "api_key" | "oauth" | "none"`; optional. Default: `"environment"`. How the Harness authenticates to the model; none when it calls no model.
 - **`secrets`** — `array of string`; optional. Default: `[]`. Names of the Harness's declared secrets this Agent grants it.
 - **`endpoint`** — `string | null`; optional. Default: `null`.
@@ -190,6 +201,8 @@ A catalog-backed model and its optional execution harness.
 
 A semantic version that pins an ordered set of Tasks.
 
+- **`seatings`** — `"rotate" | "fixed"`; optional. Default: `"rotate"`.
+- **`opponents`** — `array of string`; optional. Default: `[]`.
 - **`categories`** — `array of BenchmarkCategory`; optional. Default: `[]`.
 - **`scoring`** — `BenchmarkScoring`; optional.
 - **`tracks`** — `array of EvaluationTrack`; optional. Default: `[]`.
@@ -309,6 +322,8 @@ Everything needed to continue a Trial from after step ``step``.
 - **`prefix_steps`** — `array of object`; optional.
 - **`prefix_states`** — `array of object`; optional.
 - **`prefix_metrics`** — `array of object`; optional.
+- **`clock`** — `object | null`; optional. Default: `null`.
+- **`personas`** — `array of object`; optional.
 
 ## CheckpointWorkspace
 
@@ -318,6 +333,14 @@ The workspace snapshot a checkpoint restores.
 - **`commit`** — `string | null`; optional. Default: `null`.
 - **`skipped`** — `array of string`; optional.
 - **`problem`** — `string | null`; optional. Default: `null`.
+
+## Clock
+
+Simulated time, for a world that changes on its own.
+
+- **`start`** — `number | string`; optional. Default: `0.0`.
+- **`unit`** — `"second" | "minute" | "hour" | "day"`; optional. Default: `"day"`.
+- **`pacing`** — `"agent_paced" | "event_driven"`; optional. Default: `"event_driven"`.
 
 ## DeclarativeImage
 
@@ -391,6 +414,13 @@ Versioned rules that make results on one track comparable.
 - **`max_seconds`** — `number | null`; optional. Default: `null`.
 - **`max_cost_usd`** — `number | null`; optional. Default: `null`.
 
+## Every
+
+A period: every ``sim_time`` clock units, or every ``steps`` steps.
+
+- **`sim_time`** — `number | null`; optional. Default: `null`.
+- **`steps`** — `integer | null`; optional. Default: `null`.
+
 ## ExecutionLimits
 
 How long one episode may run.
@@ -463,6 +493,7 @@ A declared executable Agent interaction strategy.
 - **`readme`** — `string`; optional. Default: `""`. Markdown overview shown on the Harness page.
 - **`tools`** — `array of HarnessTool`; optional. Default: `[]`. The tools the Harness brings itself, such as bash or edit, by name or {name, description}. A fork compares them with the tools a history used.
 - **`supports_resume`** — `boolean`; optional. Default: `false`. Whether the Harness reads HarnessEnvironment.resume and continues a history as its own conversation.
+- **`context_strategies`** — `array of "window" | "summarize" | "none"`; optional. Default: `[]`. The context policies the Harness's loop carries out: window, summarize, none. An Agent chooses one in harness_config.context; empty, it may set none.
 
 ## HarnessPolicy
 
@@ -480,6 +511,13 @@ One tool a Harness brings itself, such as ``Bash`` or ``apply_patch``.
 - **`name`** — `string`; required. Constraints: `{"minLength": 1}`.
 - **`description`** — `string`; optional. Default: `""`.
 
+## Horizon
+
+When an autonomous episode ends: after ``sim_time`` clock units, or ``max_steps`` steps.
+
+- **`sim_time`** — `number | null`; optional. Default: `null`.
+- **`max_steps`** — `integer | null`; optional. Default: `null`.
+
 ## MetricSpec
 
 One metric a Verifier declares: what it measures and which way is better.
@@ -494,6 +532,7 @@ One metric a Verifier declares: what it measures and which way is better.
 - **`gate`** — `boolean`; optional. Default: `false`.
 - **`target`** — `string | null`; optional. Default: `null`.
 - **`description`** — `string`; optional. Default: `""`.
+- **`seat_aggregate`** — `"mean" | "sum" | "min" | "max" | null`; optional. Default: `null`.
 
 ## NetworkMode
 

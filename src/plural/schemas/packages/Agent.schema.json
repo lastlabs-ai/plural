@@ -164,6 +164,20 @@
           "title": "Command",
           "type": "array"
         },
+        "context_strategies": {
+          "default": [],
+          "description": "The context policies the Harness's loop carries out: window, summarize, none. An Agent chooses one in harness_config.context; empty, it may set none.",
+          "items": {
+            "enum": [
+              "window",
+              "summarize",
+              "none"
+            ],
+            "type": "string"
+          },
+          "title": "Context Strategies",
+          "type": "array"
+        },
         "description": {
           "default": "",
           "title": "Description",
@@ -440,7 +454,7 @@
     },
     "harness_config": {
       "additionalProperties": true,
-      "description": "Options for the Agent's Harness. A built-in Harness validates them; a custom one reads them in self.config, over its own config.",
+      "description": "Options for the Agent's Harness. A built-in Harness validates them; a custom one reads them in self.config, over its own config. context chooses one of the Harness's context strategies: {strategy: window | summarize | none, max_tokens, keep_last_turns}.",
       "title": "Harness Config",
       "type": "object"
     },

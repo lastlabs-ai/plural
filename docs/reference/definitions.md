@@ -42,8 +42,9 @@ A few rules that matter:
 - **Harness:** `Harness` is the base class you subclass to write one;
   `HarnessDefinition` is the flattened public schema that describes a packaged Harness
   in YAML and the API.
-- **Benchmark:** it ranks only on the Verifier `score` (`primary_metric` defaults to
-  `"score"`); rewards count only through a Verifier whose `check` is `total_reward`.
+- **Benchmark:** it ranks on `primary_metric`: the Verifier `score` by default, or a
+  metric a Verifier declares, in that metric's direction. Rewards count only through a
+  Verifier whose `check` is `total_reward`.
 
 ## Versions and strict fields
 

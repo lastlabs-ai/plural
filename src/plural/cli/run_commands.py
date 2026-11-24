@@ -9,14 +9,16 @@ and label the result.
 
 from __future__ import annotations
 
+import asyncio
 import os
+import re
 import sys
 import uuid
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Awaitable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import typer
 from pydantic import ValidationError
@@ -60,6 +62,7 @@ from plural.local_models import (
     Status,
     review_local_models,
 )
+from plural.metrics import in_unit
 from plural.project import ProjectError, Workspace
 from plural.project.layout import (
     AGENT,
@@ -72,6 +75,7 @@ from plural.project.layout import (
 )
 from plural.project.runs import (
     DEFAULT_HARNESS,
+    ClientJob,
     CredentialSource,
     RunPlan,
     RunRequest,
@@ -83,6 +87,7 @@ from plural.project.runs import (
     local_jobs,
     local_trial,
     plan_run,
+    planned_record,
     push_local_job,
     push_pinned,
     push_run_inputs,
@@ -90,6 +95,7 @@ from plural.project.runs import (
     rerun_local_trial,
     run_local,
     run_roots,
+    submit_client_job,
 )
 from plural.project.sync import REBUILT_NOTE, PullStep, PushStep, dropped_versions, pull_missing
 from plural.project.versions import holds_version, version_workspace, versioned
@@ -123,7 +129,7 @@ TRACK_OPTION = typer.Option(False, "--track", hidden=True)
 
 @handled
 def run(
-    task: str | None = typer.Option(None, "--task", "-t", help=f"Task to run: {REF_HELP}."),
+    tasks: list[str] | None = typer.Option(None, "--task", "-t", help=f"Task to run: {REF_HELP}."),
     benchmark: str | None = typer.Option(
         None,
         "--benchmark",
@@ -209,6 +215,26 @@ def run(
         "-y",
         help="Use an endpoint Agent's model without asking, even one you have not accepted.",
     ),
+    budget_usd: float | None = typer.Option(
+        None,
+        "--budget-usd",
+        min=0,
+        help=(
+            "At most what the Agents may spend on models. Each Trial gets an even share as "
+            "its cost limit, and no Trial starts once it is spent."
+        ),
+    ),
+    detach: bool = typer.Option(
+        False,
+        "--detach",
+        help=(
+            "Run the Job in a Daytona sandbox instead of on this machine, and return. Its "
+            "Environments must use the local Runtime, which runs inside the sandbox. It "
+            "records the Job in the hosted project as it runs. Follow it with plural job show."
+        ),
+    ),
+    run_id: str | None = typer.Option(None, "--run-id", hidden=True),
+    recorded_as: str | None = typer.Option(None, "--recorded-as", hidden=True),
     as_json: bool = JSON_OPTION,
 ) -> None:
     """Run one Task or Benchmark with a model or a saved Agent. Every run is a new Job.
@@ -228,6 +254,12 @@ def run(
     if hosted or follow:
         raise ProjectError(HOSTED_RUNS)
     model, agent = _one(models, "--model"), _one(agents, "--agent")
+    if tasks and len(tasks) > 1:
+        raise ProjectError(
+            "Pass --task once. To run several Tasks in one Job, list them in a Benchmark "
+            "and pass --benchmark."
+        )
+    task = tasks[0] if tasks else None
     try:
         episode_server = EpisodeServerOptions(
             listen=listen, public_url=public_url, tls_cert=tls_cert, tls_key=tls_key
@@ -253,6 +285,7 @@ def run(
         concurrency=_concurrency(concurrency),
         evaluation_track=evaluation_track,
         heldout=heldout,
+        run_id=_run_id(run_id) if run_id else (uuid.uuid4().hex if detach else None),
     )
     requested = {
         ResourceRef(kind.name, name): version
@@ -293,8 +326,24 @@ def run(
         payload = _plan_payload(plan)
         emit(payload, as_json=as_json, text=lambda: _print_plan(payload))
         return
+    if detach:
+        if retained:
+            raise ProjectError("--detach runs the project's own files; drop the @version.")
+        _detach(space, current, plan, request, environ, budget_usd=budget_usd, as_json=as_json)
+        return
     tracking = None
-    if record:
+    if recorded_as:
+        # A detached run's sandbox: the hosted Job exists, and its inputs were pushed.
+        from plural.project import detach as detaching
+
+        studio, _ = project_studio(space, current)
+        hosted_job_id, hosted_agents = detaching.read_recording(root)
+        if hosted_job_id != recorded_as:
+            raise ProjectError(f"This project was packaged to record Job {hosted_job_id}.")
+        tracking = Tracking(
+            studio, client=ClientJob(record={"id": hosted_job_id}, agents=hosted_agents)
+        )
+    elif record:
         studio, binding = project_studio(space, current)
         pushed = push_run_inputs(space, studio, binding, plan)
         if pushed:
@@ -325,8 +374,149 @@ def run(
             credential_source=_stored_credentials(as_json),
             episode_server=episode_server,
             model_identities=identities,
+            budget_usd=budget_usd,
         )
     _finish_local(space, job_id, result, tracking, as_json=as_json)
+
+
+def _run_id(value: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{32}", value):
+        raise ProjectError("--run-id is 32 lowercase hex digits.")
+    return value
+
+
+def _detach(
+    space: Workspace,
+    current: Session,
+    plan: RunPlan,
+    request: RunRequest,
+    environ: Mapping[str, str],
+    *,
+    budget_usd: float | None,
+    as_json: bool,
+) -> None:
+    """Start the planned Job in a Daytona sandbox, recorded in the hosted project.
+
+    The hosted Job is created here, after the inputs are pushed, and the
+    sandbox gets the project's binding and a key that records that Job and
+    calls models for it, and nothing else.
+    """
+    from plural.project import detach
+    from plural.sandbox.daytona import DaytonaProvider
+
+    detach.refuse_runtimes(plan)
+    api = current.api_url.rstrip("/")
+    gateway = environ.get("PLURAL_GATEWAY_URL") or f"{api}/v1"
+    detach.refuse_unreachable(api)
+    if detach.calls_models(plan):
+        detach.refuse_unreachable(gateway)
+    studio, binding = project_studio(space, current)
+    pushed = push_run_inputs(space, studio, binding, plan)
+    if pushed:
+        _print_pushed(pushed, err=as_json)
+        space = Workspace(Project.at(space.project.root))
+        plan = plan_run(space, request, environ=environ)
+    spec, record = planned_record(space, plan)
+    job_id = spec.job_id
+    client = submit_client_job(space, studio, spec, record)
+    minted = studio.jobs.runner_key(job_id, ttl_seconds=int(detach.lifetime_seconds(plan)))
+    env = {
+        "PLURAL_API_KEY": str(minted["key"]),
+        "PLURAL_API_URL": api,
+        "PLURAL_GATEWAY_URL": gateway,
+    }
+    expires_at = str(minted.get("expires_at") or "") or None
+    extra = detach.recording_files(
+        space.project.binding_path.read_bytes(), client.job_id, client.agents
+    )
+    assert request.run_id is not None
+    args = [
+        *(
+            ("--task", str(request.task))
+            if request.task
+            else ("--benchmark", str(request.benchmark))
+        ),
+        *(("--agent", request.agent) if request.agent else ("--model", str(request.model))),
+        *(("--harness", request.harness) if request.harness else ()),
+        "--attempts",
+        str(plan.spec.attempts),
+        "--concurrency",
+        str(plan.spec.concurrency),
+        *(("--heldout",) if request.heldout else ()),
+        *(("--budget-usd", str(budget_usd)) if budget_usd is not None else ()),
+        "--run-id",
+        request.run_id,
+        "--recorded-as",
+        client.job_id,
+        "--yes",
+    ]
+    typer.echo(
+        f"Detaching {plan.source} with {plan.agent.name} to a Daytona sandbox: "
+        f"{counted(len(plan.job.plan.trials), 'Trial')}"
+        + ", with a key that records this Job alone.",
+        err=as_json,
+    )
+    try:
+        provider = DaytonaProvider(environ=environ)
+        launched = asyncio.run(
+            _closing(
+                provider,
+                detach.launch(
+                    space,
+                    plan,
+                    provider=provider,
+                    args=args,
+                    env=env,
+                    key_expires_at=expires_at,
+                    extra=extra,
+                ),
+            )
+        )
+    except BaseException:
+        studio.jobs.end_runner_key(job_id)
+        raise
+    payload = {**launched.to_json(), "hosted_job_id": client.job_id}
+    emit(
+        payload,
+        as_json=as_json,
+        text=lambda: typer.echo(
+            f"Job {job_id} is running in Daytona sandbox {launched.sandbox_id}, recorded as "
+            f"hosted Job {client.job_id}; it no longer needs this machine.\n"
+            f"Follow it: plural job show {job_id}"
+        ),
+    )
+
+
+def _sync_detached(space: Workspace, job_id: str) -> None:
+    """Copy a detached Job back from its sandbox; once it has finished, revoke its key."""
+    from plural.project import detach
+    from plural.sandbox.daytona import DaytonaProvider
+
+    record = detach.detached(space, job_id)
+    if record is None or record.finished:
+        return
+    current = session()
+
+    def finished(item: detach.Detached) -> None:
+        if item.key_expires_at:
+            studio, _ = project_studio(space, current)
+            studio.jobs.end_runner_key(job_id)
+
+    provider = DaytonaProvider(environ=_run_environ(current))
+    asyncio.run(
+        _closing(provider, detach.sync(space, job_id, provider=provider, on_finish=finished))
+    )
+
+
+_T = TypeVar("_T")
+
+
+async def _closing(provider: Any, work: Awaitable[_T]) -> _T:
+    """Await ``work``, then close the provider's client."""
+    try:
+        return await work
+    finally:
+        await provider.close()
 
 
 def _heldout_notice(space: Workspace, plan: RunPlan, *, err: bool) -> None:
@@ -519,6 +709,7 @@ def job_show(
     """Show a Job and its Trials (local first, then hosted)."""
     space = workspace()
     if (space.project.jobs_dir / job_id).is_dir():
+        _sync_detached(space, job_id)
         if follow:
             _follow_local(space, job_id)
         payload = {"location": "local", **local_job(space, job_id)}
@@ -564,8 +755,9 @@ def job_record(
 
     The hosted Job pins the pushed revisions the local Job ran, so push those
     first, or pass --push-pinned when your files changed since the run.
-    Recording again, or recording a Job that ran with --record, uploads only
-    what the hosted Job does not hold yet.
+    Recording again, or recording a Job that ran with --record, uploads what
+    the hosted Job does not hold yet and republishes each Trial it already
+    holds, so its outcome, score, seats, and gates match the local Job now.
     """
     space = workspace()
     finished_local_job(space, job_id)
@@ -578,6 +770,7 @@ def job_record(
         "hosted_job_id": pushed.job.job_id,
         "project": binding.project_slug,
         "executions": pushed.executions,
+        "republished": pushed.republished,
         "status": hosted.get("status"),
         "pushed": [{"resource": str(step.ref), "revision": step.label} for step in pinned],
     }
@@ -589,8 +782,9 @@ def job_record(
                 typer.echo(f"  {step.ref} {step.label}")
         typer.echo(
             f"Recorded local Job {job_id} as hosted Job {pushed.job.job_id} in project "
-            f"{binding.project_slug}: {counted(pushed.executions, 'execution')}, "
-            f"{hosted.get('status')}."
+            f"{binding.project_slug}: {counted(pushed.executions, 'execution')}"
+            + (f" ({pushed.republished} republished)" if pushed.republished else "")
+            + f", {hosted.get('status')}."
         )
 
     emit(payload, as_json=as_json, text=text)
@@ -718,6 +912,69 @@ def _fork_source(
         shadow, source = hosted_trial_source(space, studio, binding, given, carry=carry)
         return shadow, given, source, given
     return space, trial_id, trial_source(space, trial_id), given if given != trial_id else None
+
+
+@trial_app.command("resume")
+@handled
+def trial_resume(
+    trial_id: str = typer.Argument(help="Interrupted local Trial to continue."),
+    budget_usd: float | None = typer.Option(
+        None,
+        "--budget-usd",
+        min=0,
+        help="At most what the resumed execution may spend on models, on top of what it had.",
+    ),
+    as_json: bool = JSON_OPTION,
+) -> None:
+    """Continue a Trial whose runner died from its latest run checkpoint.
+
+    An Environment with checkpoint_every marks run checkpoints as the episode
+    runs. The world, the workspace, the clock, and the Agent's context are
+    restored as they stood there, and the cost, turns, and time spent before carry over.
+    """
+    from plural.project.runs import resume_local_trial
+
+    space = workspace()
+    job_id, _ = find_local_trial(space, trial_id)
+    environ = _project_secrets(
+        space, local_job_spec(space, job_id), _run_environ(session()), err=as_json
+    )
+    with _credit_watch(session(), environ, err=as_json):
+        job_id, result, resumed = resume_local_trial(
+            space,
+            trial_id,
+            environ=environ,
+            progress=_progress(as_json),
+            credential_source=_stored_credentials(as_json),
+            budget_usd=budget_usd,
+        )
+    trial = next(item for item in result.trials if item.receipt.trial_id == trial_id)
+    payload = {
+        "job_id": job_id,
+        "trial_id": trial_id,
+        "status": trial.status,
+        "resumed": resumed.model_dump(mode="json"),
+        "score": trial.score,
+        "metrics": trial.metrics,
+        "cost_usd": trial.receipt.cost_usd,
+        "stop_reason": trial.stop_reason,
+    }
+
+    def text() -> None:
+        at = f" (time {resumed.sim_time:g})" if resumed.sim_time is not None else ""
+        typer.echo(
+            f"Resumed Trial {trial_id} after step {resumed.step}{at} as execution "
+            f"{trial.receipt.execution_id}: {trial.status}, stop reason {trial.stop_reason}."
+        )
+        if trial.score is not None:
+            typer.echo(f"  score {trial.score:g}")
+        if resumed.carried_cost_usd:
+            carried = resumed.carried_cost_usd
+            typer.echo(f"  carried over ${carried:.4f} spent before the checkpoint")
+
+    emit(payload, as_json=as_json, text=text)
+    if trial.status in {"failed", "cancelled"}:
+        raise typer.Exit(1)
 
 
 @trial_app.command("checkpoint")
@@ -1392,8 +1649,16 @@ def _print_result(
         primary = aggregate.metrics.get(aggregate.primary_metric)
         ranked_on = (
             f"{aggregate.primary_metric} "
-            + ("-" if primary is None or primary.mean is None else f"{primary.mean:,.3f}")
-            + ("" if primary is None else f" (over {primary.n} of {primary.total})")
+            + (
+                "-"
+                if primary is None or primary.mean is None
+                else in_unit(primary.mean, primary.unit)
+            )
+            + (
+                ""
+                if primary is None
+                else f" (over {primary.n} of {primary.total}, {primary.direction} is better)"
+            )
             if aggregate.primary_metric != "score"
             else ""
         )
@@ -1410,6 +1675,8 @@ def _print_result(
         if aggregate.pass_rate is not None:
             line += f"; pass rate {aggregate.pass_rate:.0%} (passed every gate)"
         typer.echo(f"  {aggregate.agent_name}: {line}")
+        for seat_line in _seat_lines(aggregate.model_dump(mode="json").get("seats") or {}):
+            typer.echo(seat_line)
     tiers = Counter(trial.trust.tier for trial in result.trials if trial.trust is not None)
     if tiers:
         typer.echo("  trust: " + ", ".join(f"{count} {tier}" for tier, count in tiers.items()))
@@ -1421,19 +1688,39 @@ def _print_result(
 def ranked(aggregates: Iterable[AgentAggregate]) -> list[AgentAggregate]:
     """Leaderboard order: best on the primary metric first, Agents without a value last.
 
+    A Benchmark's fixed opponents follow every ranked Agent.
+
     Returns:
         The aggregates, ranked.
     """
     items = list(aggregates)
 
-    def key(item: AgentAggregate) -> tuple[bool, float]:
+    def key(item: AgentAggregate) -> tuple[bool, bool, float]:
         if item.primary is None:
-            return (True, 0.0)
+            return (item.opponent, True, 0.0)
         spec = item.metrics.get(item.primary_metric)
         lower = spec is not None and spec.direction == "lower"
-        return (False, item.primary if lower else -item.primary)
+        return (item.opponent, False, item.primary if lower else -item.primary)
 
     return sorted(items, key=key)
+
+
+def _seat_lines(seats: Mapping[str, Any]) -> list[str]:
+    """One line per seat an Agent played: its mean score, metric means, and pass rate there.
+
+    Returns:
+        The lines, indented under the Agent's.
+    """
+    lines = []
+    for seat, item in seats.items():
+        mean = item.get("mean_score")
+        parts = [f"score {'-' if mean is None else f'{mean:.2f}'}"] + [
+            f"{name} {value:,.2f}" for name, value in (item.get("metrics") or {}).items()
+        ]
+        if item.get("pass_rate") is not None:
+            parts.append(f"pass rate {item['pass_rate']:.0%}")
+        lines.append(f"    as {seat}: {', '.join(parts)} ({counted(item['count'], 'Trial')})")
+    return lines
 
 
 def _reward_warnings(trials: Iterable[TrialResult]) -> list[str]:
@@ -1478,7 +1765,20 @@ def _print_job(payload: dict[str, Any]) -> None:
             f"  Progress: {progress['finished']}/{progress['planned']} finished, "
             f"{progress['running']} running, {progress['succeeded']} succeeded, "
             f"{progress['failed']} failed"
+            + (f", {progress['interrupted']} interrupted" if progress.get("interrupted") else "")
         )
+    away = payload.get("detached")
+    if isinstance(away, dict):
+        typer.echo(
+            f"  Detached: on {away['provider']} sandbox {away['sandbox_id']}, "
+            f"last synced {away.get('synced_at') or 'never'}"
+        )
+        for item in payload.get("unfinished") or []:
+            typer.echo(f"  Running: {item['trial_id']}{_run_position(item.get('run'))}")
+    for item in payload.get("interrupted") or []:
+        typer.echo(f"  Interrupted: {item['trial_id']}{_run_position(item.get('run'))}")
+        if ((item.get("run") or {}).get("checkpoint") or {}).get("step") is not None:
+            typer.echo(f"    Next: plural trial resume {item['trial_id']}")
     texts = {
         item["agent_name"]: item["text"]
         for item in payload.get("summaries") or []
@@ -1489,6 +1789,8 @@ def _print_job(payload: dict[str, Any]) -> None:
             continue
         if aggregate["agent_name"] in texts:
             typer.echo(f"  {aggregate['agent_name']}: {texts[aggregate['agent_name']]}")
+            for line in _seat_lines(aggregate.get("seats") or {}):
+                typer.echo(line)
             continue
         mean = aggregate.get("mean_score")
         typer.echo(
@@ -1519,6 +1821,25 @@ def _print_job(payload: dict[str, Any]) -> None:
         typer.echo(f"Details: plural trial show {failed[0]['trial_id']}")
 
 
+def _run_position(run: Any) -> str:
+    """Where an unfinished Trial's journal stood: its clock, and the checkpoint to resume from."""
+    if not isinstance(run, dict):
+        return ""
+    parts = []
+    clock = run.get("clock") or {}
+    if clock.get("now") is not None:
+        parts.append(f"at sim time {clock['now']:g}")
+    checkpoint = run.get("checkpoint") or {}
+    if checkpoint.get("step") is not None:
+        where = f"step {checkpoint['step']}"
+        if checkpoint.get("sim_time") is not None:
+            where += f", sim time {checkpoint['sim_time']:g}"
+        parts.append(f"resumable from {where}")
+    else:
+        parts.append("no run checkpoint yet, so it can't be resumed")
+    return " (" + "; ".join(parts) + ")"
+
+
 def _print_trial(payload: dict[str, Any]) -> None:
     typer.echo(f"Trial {payload['trial_id']} ({payload['location']}) {payload.get('status')}")
     for label, key in (
@@ -1536,6 +1857,10 @@ def _print_trial(payload: dict[str, Any]) -> None:
     ):
         if payload.get(key) is not None:
             typer.echo(f"  {label + ':':<15} {payload[key]}")
+    if payload.get("status") == "interrupted":
+        typer.echo(f"  {'Interrupted:':<15} the runner stopped{_run_position(payload.get('run'))}")
+        if ((payload.get("run") or {}).get("checkpoint") or {}).get("step") is not None:
+            typer.echo(f"  Next: plural trial resume {payload['trial_id']}")
     trust = payload.get("trust") or {}
     if trust.get("tier"):
         reasons = "; ".join(trust.get("reasons") or [])

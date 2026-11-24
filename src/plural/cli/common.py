@@ -156,7 +156,7 @@ def details(pairs: Iterable[tuple[str, str]]) -> None:
 
 def note(message: str) -> None:
     """Print a caution the user should act on."""
-    typer.echo(typer.style("! ", fg="yellow", bold=True) + message)
+    typer.echo(typer.style("! ", fg="yellow", bold=True) + message, err=True)
 
 
 def workspace() -> Workspace:

@@ -10,6 +10,8 @@ from typing import Any, Literal
 from pydantic import Field, ValidationError
 
 from plural.common import (
+    CONTEXT_STRATEGIES,
+    ContextStrategy,
     FileDeclaration,
     FrozenModel,
     HarnessCapability,
@@ -120,6 +122,9 @@ class BuiltinHarnessSpec:
     """The CLI's own tools at ``pinned_version``, by the names its hooks report."""
     supports_resume: bool = False
     """Whether Plural can hand the CLI a history as its own session."""
+    context_strategies: tuple[ContextStrategy, ...] = ()
+    """The context policies an Agent may choose for the CLI. A vendor CLI manages its
+    own context, so only ``none``."""
 
 
 BUILTIN_HARNESSES: dict[str, BuiltinHarnessSpec] = {
@@ -131,6 +136,7 @@ BUILTIN_HARNESSES: dict[str, BuiltinHarnessSpec] = {
         supported_models=("*",),
         capabilities=_CODE_CAPABILITIES,
         pip_package="hermes-agent",
+        context_strategies=("none",),
     ),
     "claude-code": BuiltinHarnessSpec(
         name="claude-code",
@@ -156,6 +162,7 @@ BUILTIN_HARNESSES: dict[str, BuiltinHarnessSpec] = {
             "Write",
         ),
         supports_resume=True,
+        context_strategies=("none",),
     ),
     "codex": BuiltinHarnessSpec(
         name="codex",
@@ -166,6 +173,7 @@ BUILTIN_HARNESSES: dict[str, BuiltinHarnessSpec] = {
         capabilities=_CODE_CAPABILITIES,
         npm_package="@openai/codex",
         tools=("apply_patch", "shell", "update_plan", "view_image", "web_search"),
+        context_strategies=("none",),
     ),
 }
 _BUILTIN_CLASSES = {
@@ -340,6 +348,29 @@ def package_tools(package: HarnessPackage) -> tuple[tuple[str, ...], bool]:
         # only in an Environment with no Apps.
         return tuple(item.name for item in definition.tools), True
     return tuple(item.name for item in definition.tools), definition.supports_resume
+
+
+NATIVE_CONTEXT_STRATEGIES: tuple[ContextStrategy, ...] = CONTEXT_STRATEGIES
+"""The context policies the native loop carries out."""
+
+
+def package_context_strategies(package: HarnessPackage) -> tuple[ContextStrategy, ...]:
+    """The context policies a Harness's loop carries out, which an Agent may choose.
+
+    The native loop's and a built-in's are fixed here, so their package hashes stay
+    the same; every other Harness declares them on its protocol.
+
+    Returns:
+        The strategies, empty when the Agent may set no context policy.
+    """
+    definition = package.definition
+    command = " ".join(definition.command)
+    for name, class_name in _BUILTIN_CLASSES.items():
+        if f"vendor_harnesses.py:{class_name}" in command:
+            return BUILTIN_HARNESSES[name].context_strategies
+    if definition.command[:2] == ("python", "native_runner.py"):
+        return NATIVE_CONTEXT_STRATEGIES
+    return definition.context_strategies
 
 
 def legacy_declared_harness_error(name: str) -> ValueError:

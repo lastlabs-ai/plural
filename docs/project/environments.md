@@ -289,6 +289,93 @@ Trial, the record of one attempt. The full set of values is `plural.STOP_REASONS
 neither is set when the Agent chose to stop. Read `stop_reason` to tell an Agent that
 finished early from a world that declared the Task over.
 
+## Simulated time
+
+Some worlds change on their own: customers arrive, deliveries land, rent comes due. Give
+the Environment a `clock` and its Apps share one simulated time:
+
+```yaml
+clock:
+  unit: day        # second, minute, hour, or day
+  start: 1         # a number, or an ISO-8601 time that only labels the clock
+horizon:
+  sim_time: 365    # end the episode after a year; max_steps also works
+autonomous: true   # the Agent can't call finish; a reply with no action waits
+checkpoint_every:
+  sim_time: 7      # mark a run checkpoint every simulated week
+```
+
+With a clock, Plural adds a `wait` action. A `wait` with no time runs the world to the
+next thing that happens; `wait(until=12)` runs it to time 12. Every observation is
+prefixed with the time, such as `Day 12`. With the default `pacing: event_driven`, time
+moves only when the Agent waits; with `agent_paced`, each action also takes the time its
+App's `action_duration()` returns.
+
+An App takes part through three hooks on `App`:
+
+- `self.schedule(at, kind, **data)` books an event, such as a delivery on day 9.
+- `advance(until)` brings the App up to the clock's new time and returns what happened.
+  The App host calls it at each scheduled event and at the end of every wait. Each item
+  it returns is a step with `source: environment`, shown to the Agent with its time.
+- `next_event_time()` says when the App next has something happen. A plain `wait` runs
+  to the earliest of every App's.
+
+`self.now` reads the clock. The episode ends with `stop_reason: horizon_reached` at the
+horizon. An `autonomous` Environment never offers `finish`; set `allow_finish: true` to
+offer it anyway.
+
+### Checkpoints and resume
+
+A long run can be interrupted: the machine sleeps, the process is killed, the sandbox is
+reclaimed. With `checkpoint_every`, the App host marks a run checkpoint every period:
+each App's State and RNG state, the workspace, the clock, and the Agent's context. An
+interrupted Trial shows as `interrupted` in `plural job show`, with the checkpoint it can
+resume from, and `plural trial resume TRIAL_ID` continues it from there. The resumed
+execution is the same Trial, not a fork: its steps, States, metric points, cost, and turns
+before the checkpoint are carried over, and the Trial records where it `resumed`. With the
+same seed it finishes as an uninterrupted run would.
+
+### Simulated people
+
+A **persona** is a simulated person an App asks for an answer, such as a supplier who
+quotes a price. It is part of the world, not an Agent: it is never ranked, and what its
+model calls cost is the Environment's cost, reported apart from the Agent's.
+
+```python
+from plural import App, action
+from plural.sim import Persona
+
+
+class Suppliers(App[Orders]):
+    pinecrest = Persona(
+        "pinecrest",
+        "You sell snacks wholesale. Quote $0.40 a unit; deliveries take 3 days.",
+        model="openai/gpt-5.6-luna",
+    )
+
+    @action
+    def email(self, supplier: str, message: str) -> str:
+        """Write to a supplier; their reply comes back."""
+        return self.pinecrest.reply(self, message, history=self.state.thread)
+```
+
+Each call is seeded from the App's RNG and recorded in the Trial's `personas.jsonl`, so a
+fork or a resumed Trial replays the recorded answer instead of asking the model again.
+A persona needs no clock: it can answer at once, as above, or later, when an App with a
+clock schedules its reply as an event. Give it a `script` to answer without a model,
+such as in a Runtime with no gateway key.
+
+The Agent must not be able to tell it is dealing with a simulation. Plural wraps every
+persona's instructions in a stay-in-character frame before its model is asked: it
+writes only what that person would, and never says it is an AI, a model, a simulation,
+or a test, or mentions its instructions. Return its words as an ordinary observation,
+such as an email, with no persona name, role, or model details. Nothing Plural adds to
+what the Agent sees (tool names and descriptions, observations, the native loop's
+messages, and the variables and user name a command the Agent runs can read) mentions
+Plural, an evaluation, a benchmark, or a simulation, so only words you write can. When
+a reply breaks character anyway, the Trial shows a
+[`sim_leak`](../operations/integrity.md#flag-suspicious-trials) finding.
+
 ## Rewards
 
 A **reward** is a small bit of credit for one move. It answers "which action deserved

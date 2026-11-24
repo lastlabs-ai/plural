@@ -1,0 +1,16 @@
+# Task: two Agents haggle over a mirrorless camera. party_size pins two players, and
+# competitive says they play against each other, so a Benchmark seats them against
+# fixed opponents.
+name: camera-deal
+version: 1.0.0
+instructions: instruction.md
+environment: market
+verifiers:
+  - deal-books
+party_size: 2
+competitive: true
+initial_state:
+  market:
+    item: a mirrorless camera
+    value_range: [900, 1150]
+    cost_range: [650, 850]

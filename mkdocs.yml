@@ -69,6 +69,8 @@ plugins:
           - tutorials/support-queue.md
           - tutorials/wordle.md
           - tutorials/shopkeeper.md
+          - tutorials/vending-sim.md
+          - tutorials/negotiation.md
         Operations:
           - reference/integrations.md
   - mkdocstrings:
@@ -142,5 +144,7 @@ nav:
       - Support queue: tutorials/support-queue.md
       - Wordle: tutorials/wordle.md
       - Shopkeeper: tutorials/shopkeeper.md
+      - Vending machine for a year: tutorials/vending-sim.md
+      - Negotiation: tutorials/negotiation.md
   - Operations:
       - Providers and integrations: reference/integrations.md

@@ -191,6 +191,33 @@ def episode_to_atif(
             added = add({key: value for key, value in step.items() if value is not None})
             if isinstance(turn, int):
                 agent_steps[turn] = added
+        elif kind == "context.compaction":
+            seen_messages = int(record.get("message_count") or 0)
+            raw_usage = _mapping(record.get("usage"))
+            usage = TokenUsage.model_validate(
+                {key: raw_usage.get(key) for key in TokenUsage.model_fields}
+            )
+            summarized = record.get("summary") is not None
+            compaction: dict[str, Any] = {
+                "timestamp": record.get("started_at"),
+                "source": "agent" if summarized else "system",
+                "message": _text(record.get("summary"))
+                if summarized
+                else f"Context compacted: {record.get('dropped_messages')} messages dropped.",
+                "extra": {
+                    "context_compaction": {
+                        "strategy": record.get("strategy"),
+                        "tokens_before": record.get("tokens_before"),
+                        "tokens_after": record.get("tokens_after"),
+                        "dropped_messages": record.get("dropped_messages"),
+                    }
+                },
+            }
+            if summarized:
+                compaction["model_name"] = str(record.get("model") or model_name or "") or None
+                compaction["metrics"] = _metrics(usage, None, record.get("duration_ms"))
+                compaction["llm_call_count"] = 1
+            add({key: value for key, value in compaction.items() if value is not None})
         elif kind in {"environment.step", "agent.finish"}:
             owner = agent_steps.get(turn) if isinstance(turn, int) else None
             if owner is None:

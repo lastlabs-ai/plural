@@ -1,0 +1,31 @@
+# Verifier: what counts as good work for the Tasks that list it.
+# measure runs once a simulated day, not after every action, so a year is 365 points
+# however many actions the Agent takes. check scores the profit against the Task's
+# target. Two gates: profitable by day 60, and a machine that rarely runs dry.
+name: vending-books
+version: 1.0.0
+kind: deterministic
+check: verify.py:check
+measure:
+  python: verify.py:measure
+  every:
+    sim_time: 1
+metrics:
+  - name: net_worth_usd
+    kind: running
+    direction: higher
+    unit: USD
+    aggregate: final
+    description: Cash plus stock at book value, once a day. Its Trial value is the last day's.
+  - name: profitable_by_day_60
+    kind: binary
+    gate: true
+    description: 1 when net worth at the close of day 60 is above where it started.
+  - name: stockout_days
+    kind: number
+    direction: lower
+    gate: true
+    target: "<= 10"
+    description: >-
+      Days on which a product sold out with customers still wanting it. More than ten
+      fails the Trial: an Agent that keeps reordering stays at a handful.

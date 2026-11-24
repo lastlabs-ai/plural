@@ -1,0 +1,16 @@
+# Benchmark: a cooperative Task. With no opponents, the evaluated Agent fills both seats
+# and plays with itself; seatings has nothing to rotate.
+name: teamwork
+version: 1.0.0
+description: Two copies of one Agent open a vault together.
+purpose: Checks that an Agent shares what it knows and uses what its partner shares.
+tasks:
+  - two-keys
+scoring:
+  metric: Vault opened
+  description: 1 when the partners open the vault.
+  aggregation: weighted_mean
+  score_range: [0.0, 1.0]
+  success_threshold: 1.0
+  agent_failure: zero
+  infrastructure_error: exclude

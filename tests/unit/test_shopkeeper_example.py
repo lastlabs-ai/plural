@@ -168,6 +168,7 @@ def test_the_run_summary_ranks_on_the_running_metric_and_shows_the_pass_rate(
 ) -> None:
     from plural.cli.run_commands import _print_result
     from plural.jobs import JobResult
+    from plural.metrics import in_unit
 
     result = JobResult.model_validate(season["result"])
     passed = "100%" if season["trial"]["passed"] else "0%"
@@ -180,8 +181,11 @@ def test_the_run_summary_ranks_on_the_running_metric_and_shows_the_pass_rate(
     _print_result("job_1", result, [summary])
     line = capsys.readouterr().out.splitlines()[1]
     cash = season["trial"]["metrics"]["cash_on_hand"]
+    spec = result.aggregates[0].metrics["cash_on_hand"]
+    # In the metric's unit and direction, not as a bare number.
     assert line == (
-        f"  scripted: cash_on_hand {cash:,.3f} (over 1 of 1), score 0.43, success rate 0%, "
+        f"  scripted: cash_on_hand {in_unit(cash, spec.unit)} (over 1 of 1, "
+        f"{spec.direction} is better), score 0.43, success rate 0%, "
         f"over 1 Task; pass rate {passed} (passed every gate)"
     )
 

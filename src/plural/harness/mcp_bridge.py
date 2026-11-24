@@ -47,7 +47,7 @@ def _handle(
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "plural-environment", "version": "1"},
+                "serverInfo": {"name": "environment", "version": "1"},
             },
         )
     if method == "notifications/initialized":
