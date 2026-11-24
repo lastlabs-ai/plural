@@ -156,3 +156,7 @@ Before tagging:
 
 Downstream deployments pin a tag, so after merging a catalog PR cut a release
 and bump the pinned ref where it is consumed.
+
+Releasing includes bumping `plural-ref` in `pluralintel`: a one-line PR that sets
+it to the new tag. CI and the production API image both build against that pin,
+so the hosted product stays on the previous release until that PR merges.
