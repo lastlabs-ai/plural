@@ -15,6 +15,7 @@ import pytest
 
 from plural.apps.host import AppHost
 from plural.project import Project
+from plural.project.checks import _heldout_sections, plan_checks
 from plural.project.resources import ResourceRef, Workspace
 from plural.verifiers import DeterministicVerifier, Episode
 
@@ -127,14 +128,38 @@ def test_each_seed_starts_on_another_weekday_and_sells_differently(
     assert worth[0] != worth[1]
 
 
-def test_the_benchmark_ranks_on_dollars_and_holds_three_seeds_out(
+def test_another_run_of_customers_sells_differently_on_the_same_weekdays(
+    workspace: Workspace,
+) -> None:
+    base, _ = _play(workspace, order_until=90)
+    other, _ = _play(workspace, order_until=90, task_name="vend-quarter-h4")
+    assert other.apps["machine"].state.start_weekday == 0
+    assert other.apps["machine"].state.customers == 1
+    worth = [
+        [point["values"]["net_worth_usd"] for point in host.report()["metrics"]]
+        for host in (base, other)
+    ]
+    assert worth[0] != worth[1]
+
+
+def test_the_benchmark_ranks_on_dollars_and_holds_ten_seeds_out(
     workspace: Workspace,
 ) -> None:
     benchmark = workspace.load(ResourceRef("benchmark", "vending-quarter")).value
     assert benchmark.primary_metric == "net_worth_usd"
-    assert benchmark.heldout == ("vend-quarter-h1", "vend-quarter-h2", "vend-quarter-h3")
+    assert benchmark.heldout == tuple(f"vend-quarter-h{index}" for index in range(1, 11))
     verifier = workspace.load(ResourceRef("verifier", "vending-books")).value
     spec = {item.name: item for item in verifier.metrics}["net_worth_usd"]
     assert (spec.direction, spec.unit) == ("higher", "USD")
     hashes = {task.content_hash for task in benchmark.tasks}
-    assert len(hashes) == 7, "every seed is its own Task, so its Trials get their own seed"
+    assert len(hashes) == 14, "every seed is its own Task, so its Trials get their own seed"
+    assert plan_checks(workspace, benchmark="vending-quarter").heldout == 10
+
+
+def test_validate_warns_below_ten_held_out_tasks() -> None:
+    (section,) = _heldout_sections(3)
+    (line,) = section.lines
+    assert line.mark == "warning"
+    assert "needs 10 shared Tasks" in line.detail and "3 held-out Tasks" in line.detail
+    assert _heldout_sections(10)[0].lines[0].mark == "ok"
+    assert _heldout_sections(0) == () and _heldout_sections(None) == ()

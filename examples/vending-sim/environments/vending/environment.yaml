@@ -1,6 +1,6 @@
 # Environment: four Python Apps that share a clock counting days.
 name: vending
-version: 1.0.0
+version: 1.1.0
 description: A vending machine run for up to a year, a day at a time.
 overview: >-
   The Agent keeps a vending machine stocked and priced. Every day closes on its own:

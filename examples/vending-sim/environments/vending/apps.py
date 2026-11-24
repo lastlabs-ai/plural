@@ -96,6 +96,12 @@ class MachineState(State):
         description="The weekday of day 1, 0 for Monday. Weekends are quieter, so each "
         "start is a different run of customers.",
     )
+    customers: int = initial(
+        0,
+        minimum=0,
+        description="Which run of customers. Tasks that differ only here see different "
+        "customers on the same days.",
+    )
     prices: dict[str, float] = Field(default_factory=lambda: dict(LIST_PRICE))
     day: int = 1
     revenue_total: float = 0.0
@@ -113,6 +119,8 @@ class Machine(App[MachineState]):
 
     def reset(self, state: Mapping[str, Any]) -> Any:
         observation = super().reset(state)
+        if self.state.customers:
+            self.rng.seed(f"{self.seed}:{self.name}:customers:{self.state.customers}")
         self.schedule(self.now + 1, "close")
         return observation
 

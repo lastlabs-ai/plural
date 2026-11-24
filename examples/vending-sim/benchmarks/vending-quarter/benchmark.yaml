@@ -1,8 +1,8 @@
-# Benchmark: a quarter with the machine, on seven seeds. It ranks on net worth in
+# Benchmark: a quarter with the machine, on fourteen seeds. It ranks on net worth in
 # dollars, not on a 0-to-1 score, so an Agent that makes twice the money ranks higher.
 name: vending-quarter
-version: 1.0.0
-description: Ninety days running a vending machine, from seven different starting weekdays.
+version: 1.1.0
+description: Ninety days running a vending machine, on fourteen seeds of customers.
 purpose: >-
   Measures how much money an Agent makes over a long episode it can't hold in one
   context: whether it keeps restocking and reordering after its early turns are
@@ -15,13 +15,27 @@ tasks:
   - vend-quarter-h1
   - vend-quarter-h2
   - vend-quarter-h3
+  - vend-quarter-h4
+  - vend-quarter-h5
+  - vend-quarter-h6
+  - vend-quarter-h7
+  - vend-quarter-h8
+  - vend-quarter-h9
+  - vend-quarter-h10
 # Kept back for confirmation: seeds no run, inspection, fork or revision has used. A
 # plain run never includes them; `plural run --benchmark vending-quarter --heldout`
-# does, and is counted as a reveal.
+# does, and is counted as a reveal. Ten, because a paired verdict needs ten shared Tasks.
 heldout:
   - vend-quarter-h1
   - vend-quarter-h2
   - vend-quarter-h3
+  - vend-quarter-h4
+  - vend-quarter-h5
+  - vend-quarter-h6
+  - vend-quarter-h7
+  - vend-quarter-h8
+  - vend-quarter-h9
+  - vend-quarter-h10
 # Ranks on the Verifier's net_worth_usd: the last day's net worth, higher is better.
 primary_metric: net_worth_usd
 scoring:
