@@ -65,7 +65,7 @@ def job_inspect(
         raise ProjectError("--depth is quick, standard, or deep.")
     space = current_workspace()
     finished_local_job(space, job_id)
-    environ = _run_environ(session())
+    environ = _run_environ(session(), space)
     studio = _fork_studio(space) if depth != "quick" else None
     if depth != "quick" and studio is None:
         note(
@@ -103,7 +103,7 @@ def trial_ask(
         space,
         trial_id,
         question,
-        environ=_run_environ(session()),
+        environ=_run_environ(session(), space),
         model=model,
         progress=_progress(True),
     )

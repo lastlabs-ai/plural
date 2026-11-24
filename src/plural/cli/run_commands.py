@@ -44,6 +44,7 @@ from plural.cli.common import (
 from plural.cli.credential_commands import account_credential_source, stored_credentials
 from plural.cli.credits import CreditWatch
 from plural.cli.runtime_commands import _project_studio
+from plural.config import is_local_url
 from plural.errors import PluralError
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
 from plural.execution.episode_server import EpisodeServerOptions
@@ -269,7 +270,7 @@ def run(
     record = _recording(record, track) or bool(evaluation_track and not dry_run)
     space = workspace()
     current = session()
-    environ = _run_environ(current)
+    environ = _run_environ(current, space)
     if plural_version:
         environ[RUNTIME_VERSION_VARIABLE] = plural_version
     task, task_version = _split(task, TASK.label)
@@ -808,7 +809,7 @@ def job_rerun(
     if (space.project.jobs_dir / job_id).is_dir():
         tracking = _tracking(space, session()) if _recording(record, track) else None
         environ = _project_secrets(
-            space, local_job_spec(space, job_id), _run_environ(session()), err=as_json
+            space, local_job_spec(space, job_id), _run_environ(session(), space), err=as_json
         )
         with _credit_watch(session(), environ, err=as_json):
             new_id, result = rerun_local_job(
@@ -871,7 +872,7 @@ def trial_rerun(
     if owner is not None:
         tracking = _tracking(space, session()) if _recording(record, track) else None
         environ = _project_secrets(
-            space, local_job_spec(space, owner), _run_environ(session()), err=as_json
+            space, local_job_spec(space, owner), _run_environ(session(), space), err=as_json
         )
         with _credit_watch(session(), environ, err=as_json):
             new_id, result = rerun_local_trial(
@@ -937,7 +938,7 @@ def trial_resume(
     space = workspace()
     job_id, _ = find_local_trial(space, trial_id)
     environ = _project_secrets(
-        space, local_job_spec(space, job_id), _run_environ(session()), err=as_json
+        space, local_job_spec(space, job_id), _run_environ(session(), space), err=as_json
     )
     with _credit_watch(session(), environ, err=as_json):
         job_id, result, resumed = resume_local_trial(
@@ -1099,7 +1100,7 @@ def trial_fork(
         hosted_trial_id=hosted,
     )
     tracking = _tracking(here, session()) if recording else None
-    environ = _project_secrets(here, source.spec, _run_environ(session()), err=as_json)
+    environ = _project_secrets(here, source.spec, _run_environ(session(), here), err=as_json)
     with _credit_watch(session(), environ, err=as_json):
         job_id, result, spec = fork_local_trial(
             space,
@@ -1450,7 +1451,7 @@ def _project_secrets(
     return environ
 
 
-def _run_environ(current: Session) -> dict[str, str]:
+def _run_environ(current: Session, space: Workspace | None = None) -> dict[str, str]:
     """Process environment for a local run, with the gateway credential added.
 
     Every model call goes through the gateway, which accepts API keys, not the
@@ -1461,7 +1462,43 @@ def _run_environ(current: Session) -> dict[str, str]:
         environ["PLURAL_API_KEY"] = current.api_key
     if environ.get("PLURAL_API_KEY"):
         environ.setdefault("PLURAL_GATEWAY_URL", current.api_url.rstrip("/") + "/v1")
+    if space is not None:
+        _stale_gateway(space, current, environ)
     return environ
+
+
+def _stale_gateway(space: Workspace, current: Session, environ: dict[str, str]) -> None:
+    """Warn when ``PLURAL_GATEWAY_URL`` is on this machine but the project is hosted.
+
+    A gateway left over from local development rejects the hosted key on every
+    call. When the session is signed in to the bound platform, its gateway is
+    used instead.
+    """
+    gateway = environ.get("PLURAL_GATEWAY_URL")
+    try:
+        binding = space.project.read_binding()
+    except ProjectError:
+        return
+    if not gateway or binding is None or not is_local_url(gateway):
+        return
+    bound = binding.api_url.rstrip("/")
+    if is_local_url(bound):
+        return
+    if current.api_url.rstrip("/") == bound:
+        environ["PLURAL_GATEWAY_URL"] = f"{bound}/v1"
+        typer.echo(
+            f"! PLURAL_GATEWAY_URL is {gateway}, on this machine, but this project is "
+            f"bound to {bound}. Using {bound}/v1 instead; unset PLURAL_GATEWAY_URL to "
+            "stop this warning.",
+            err=True,
+        )
+        return
+    typer.echo(
+        f"! PLURAL_GATEWAY_URL is {gateway}, on this machine, but this project is bound "
+        f"to {bound} and you are signed in to {current.api_url}. Its model calls go to "
+        "the local gateway.",
+        err=True,
+    )
 
 
 def _recording(record: bool, track: bool) -> bool:

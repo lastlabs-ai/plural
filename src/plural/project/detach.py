@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import io
-import ipaddress
 import json
 import shlex
 import subprocess
@@ -30,9 +29,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import plural
+from plural.config import is_local_url
 from plural.project.layout import BINDING_FILE, ProjectError
 from plural.project.resources import Workspace
 from plural.project.runs import RunPlan, planned_job_id
@@ -61,7 +60,6 @@ _LAUNCH = (
 )
 _ALIVE = "{{ kill -0 {pid} 2>/dev/null && echo alive || echo done; }}"
 _PACK = "cd {project}/.plural/jobs && tar czf {remote}/sync.tgz {job}"
-_LOCAL_NAMES = {"localhost", "host.docker.internal", "gateway.docker.internal"}
 
 
 @dataclass(frozen=True)
@@ -93,14 +91,7 @@ def refuse_unreachable(url: str) -> None:
     Raises:
         ProjectError: When the URL names this machine or a private network.
     """
-    host = (urlsplit(url).hostname or "").lower()
-    private = host in _LOCAL_NAMES or host.endswith((".local", ".internal", ".localhost"))
-    try:
-        address = ipaddress.ip_address(host)
-        private = private or not address.is_global
-    except ValueError:
-        pass
-    if private or not host:
+    if is_local_url(url):
         raise ProjectError(
             f"A detached run's sandbox can't reach {url}: it is this machine or its "
             "network, and Plural never tunnels to it. Detach against a hosted Plural, "

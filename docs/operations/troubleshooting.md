@@ -175,8 +175,10 @@ Keys.
   model policy may not permit it; the service enforces the same policy when a run
   starts.
 
-`PLURAL_GATEWAY_URL` selects the gateway; `plural run` sets it from your profile. A
-provider key or `OPENAI_BASE_URL` in the environment is not used for Agent or
+`PLURAL_GATEWAY_URL` selects the gateway; `plural run` sets it from your profile. When
+it is left pointing at this machine (from local development) but the project is bound
+to a hosted platform you're signed in to, the run warns, names both, and uses the
+bound platform's gateway instead. A provider key or `OPENAI_BASE_URL` in the environment is not used for Agent or
 Verifier model calls. Model connectivity is separate from the hosted project API
 endpoint. A local run does not block network requests.
 
