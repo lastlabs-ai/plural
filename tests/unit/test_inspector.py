@@ -931,3 +931,109 @@ def test_the_bench_never_runs_a_held_out_task() -> None:
     manifest = yaml.safe_load((source / "benchmarks/quoting/benchmark.yaml").read_text("utf-8"))
     picked = {task for tasks in _categories(source).values() for task in tasks}
     assert picked and not picked & set(manifest["heldout"])
+
+
+class _Finished:
+    def __init__(self, trial_id: str, cost: float) -> None:
+        self.trial_id = trial_id
+        self.metrics = {"cost_usd": cost}
+
+
+def _forking(failed_job: dict[str, Any], monkeypatch: pytest.MonkeyPatch, run: Any) -> Any:
+    from plural.inspector import experiments
+    from plural.inspector.app import CREDENTIAL
+
+    monkeypatch.setenv(CREDENTIAL, "test")
+    monkeypatch.setattr(experiments, "run_fork", run)
+    return _app(failed_job, depth="standard", budget_usd=5.0)
+
+
+def test_a_fork_runs_in_the_background_and_fork_result_records_it(
+    failed_job: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from plural.inspector.app import FORK_LEDGER, fork_seconds
+    from plural.inspector.evidence import JobEvidence
+    from plural.inspector.findings import ForkTest
+
+    def run(*_args: Any, progress: Any, test_id: str, **_kwargs: Any) -> ForkTest:
+        for index in range(8):
+            progress(None, _Finished(f"t{index}", 0.01))
+        return ForkTest(
+            test_id=test_id,
+            job_id="job_fork",
+            step=2,
+            verdict="likely_matters",
+            candidate=1.0,
+            control=0.0,
+            candidates=4,
+            controls=4,
+            cost_usd=0.08,
+        )
+
+    app = _forking(failed_job, monkeypatch, run)
+    trial = app._trial()
+    started = app.fork(step=2, instructions="Read every clue before guessing.")
+    assert started["status"] == "running"
+    assert started["deadline_seconds"] == round(
+        fork_seconds(trial.task.environment.limits.max_seconds, 4)
+    )
+    done = app.fork_result(started["test_id"], wait_seconds=10)
+    assert done["status"] == "done"
+    assert done["beat_controls"]
+    assert [item["test_id"] for item in app.state.tests] == ["X1"]
+    assert app.state.spent_usd == pytest.approx(0.08)
+    again = app.fork_result("X1", wait_seconds=0)
+    assert again["status"] == "done"
+    assert app.state.spent_usd == pytest.approx(0.08)
+    ledger = JobEvidence(failed_job["project"], failed_job["job_id"]).directory / FORK_LEDGER
+    assert len(ledger.read_text("utf-8").splitlines()) == 8
+    ledger.unlink()
+
+
+def test_a_timed_out_fork_still_records_what_its_trials_spent(
+    failed_job: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    from plural.inspector import app as module
+    from plural.inspector.evidence import JobEvidence
+    from plural.inspector.run import fork_ledger
+
+    release = threading.Event()
+
+    def run(*_args: Any, progress: Any, **_kwargs: Any) -> None:
+        progress(None, _Finished("t0", 0.03))
+        release.wait(10)
+        raise RuntimeError("stopped")
+
+    monkeypatch.setattr(module, "fork_seconds", lambda *_args: 0.2)
+    app = _forking(failed_job, monkeypatch, run)
+    started = app.fork(step=2, instructions="Read every clue before guessing.")
+    assert app.fork_result(started["test_id"], wait_seconds=0)["status"] == "running"
+    out = app.fork_result(started["test_id"], wait_seconds=1)
+    assert out["status"] == "timed_out"
+    assert out["finished_trials"] == 1
+    assert app.state.spent_usd == pytest.approx(0.03)
+    assert app.state.tests == []
+    release.set()
+    directory = JobEvidence(failed_job["project"], failed_job["job_id"]).directory
+    assert fork_ledger(directory) == pytest.approx(0.03)
+    (directory / module.FORK_LEDGER).unlink()
+
+
+def test_the_inspector_has_time_for_forks_as_long_as_the_forked_trial(
+    failed_job: dict[str, Any],
+) -> None:
+    from plural.inspector.app import fork_seconds
+    from plural.inspector.evidence import JobEvidence
+    from plural.inspector.run import INSPECTOR_SECONDS, inspection_seconds
+
+    trial = JobEvidence(failed_job["project"], failed_job["job_id"]).trial(
+        failed_job["trials"]["nymph"]
+    )
+    limit = trial.task.environment.limits.max_seconds
+    assert inspection_seconds([trial], "quick") == INSPECTOR_SECONDS
+    assert inspection_seconds([trial], "standard") == int(
+        INSPECTOR_SECONDS + 2 * fork_seconds(limit, 4)
+    )
+    assert fork_seconds(6 * 3600, 4) > 1800

@@ -74,7 +74,9 @@ instructions: |
      it: fork at the step just before the critical step with the one change you
      would ship (instructions as the whole new text, tool_descriptions, model, or
      context), or for context, at the compaction as above, and gates set to the
-     failed gates this cause explains.
+     failed gates this cause explains. fork starts the test and returns its id;
+     call fork_result with that id until it reports done. A fork that timed out
+     can't support a Finding.
      Keep the change general, a fix for this kind of failure, never this Task's
      answer, and make it move the Agent toward what the answer key expects (its
      decision and its fields), never away from it. A fork that beats its controls confirms the cause; if it doesn't, read

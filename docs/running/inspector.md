@@ -128,10 +128,18 @@ Trials named, `--model` picks the Inspector's model (by default `openai/gpt-5.6-
 small, low-cost model), `--fork-model` limits the models a fork may switch the Agent to
 (repeat it for several; by default any gateway model), and `--json` prints everything.
 
+A fork's Trials run under the forked Trial's own Environment limits, so a fork of a long
+run gets as long as that run. Its deadline is those limits for each wave of four forks,
+plus five minutes, and the Inspector's own time limit grows to fit the forks its depth
+allows. A fork that runs past its deadline can't support a Finding, but what its Trials
+spent still counts: each fork Trial writes its cost to `inspection-forks.jsonl` beside
+the inspected Job as it finishes, and the inspection's cost is totaled from there.
+
 The forks never run with your own key. Each inspection mints a key of its own: it can
 only call models through the gateway, is tagged with the Job it inspects for audit, is
 stored as a hash, is never listed with your keys, and is revoked when the inspection
-ends (or after three hours, if it never does). The gateway can't tell a fork's model
+ends (or, if it never does, once the Inspector's time limit has passed, and within
+twelve hours). The gateway can't tell a fork's model
 call from any other, so those are its limits: scope, expiry, and revocation. It reaches only the process that holds the
 Inspector's App, never the Inspector's model or your Agent's Harness. Minting it needs
 hosted access: sign in and bind the project, or scope your key with `plural auth scope

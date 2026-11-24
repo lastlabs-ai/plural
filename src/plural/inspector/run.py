@@ -21,7 +21,7 @@ from typing import Any, Literal
 
 import yaml
 
-from plural.inspector.app import CREDENTIAL
+from plural.inspector.app import ATTEMPTS, CREDENTIAL, FORK_LEDGER, FORKS_PER_TRIAL, fork_seconds
 from plural.inspector.causes import load_causes
 from plural.inspector.evidence import JobEvidence, TrialEvidence, failed_trials
 from plural.inspector.findings import (
@@ -99,7 +99,49 @@ def inspector_workspace(project: Workspace, *, model: str | None = None) -> Work
 
 
 FORK_KEY_SECONDS = 3 * 3600
-"""How long an inspection's fork key lasts if the inspection never ends."""
+"""How long an inspection's fork key lasts by default if the inspection never ends."""
+
+MAX_FORK_KEY_SECONDS = 12 * 3600
+"""The longest an inspection's fork key may last; the platform caps it there too."""
+
+INSPECTOR_SECONDS = 3600
+"""The Inspector's own time for reading evidence and recording, beside its forks."""
+
+
+def inspection_seconds(trials: Sequence[TrialEvidence], depth: Depth) -> int:
+    """How long the Inspector may take on one Trial: its own time plus its forks'.
+
+    Each fork's deadline follows the forked Trial's Environment limits, so an
+    inspection of a long run waits for forks as long as that run.
+
+    Returns:
+        Seconds.
+    """
+    forks = FORKS_PER_TRIAL[depth]
+    longest = max(
+        (
+            fork_seconds(trial.task.environment.limits.max_seconds, ATTEMPTS[depth])
+            for trial in trials
+        ),
+        default=0.0,
+    )
+    return int(INSPECTOR_SECONDS + forks * longest)
+
+
+def fork_ledger(job_dir: Path) -> float:
+    """What an inspection's fork Trials spent, from the ledger they write as they finish.
+
+    Returns:
+        USD.
+    """
+    path = job_dir / FORK_LEDGER
+    if not path.is_file():
+        return 0.0
+    total = 0.0
+    for line in path.read_text("utf-8").splitlines():
+        with suppress(ValueError):
+            total += float(json.loads(line).get("cost_usd") or 0.0)
+    return total
 
 
 @contextmanager
@@ -287,6 +329,10 @@ def run_inspector(
         raise ProjectError("There are no failed dev Trials to inspect.")
     space = inspector_workspace(project, model=model)
     root = space.project.root
+    manifest = root / "environments" / "inspector" / "environment.yaml"
+    payload = yaml.safe_load(manifest.read_text("utf-8"))
+    payload.setdefault("limits", {})["max_seconds"] = inspection_seconds(trials, depth)
+    manifest.write_text(yaml.safe_dump(payload, sort_keys=False), "utf-8")
     each = budget_usd / len(trials)
     names: dict[str, str] = {}
     for trial in trials:
@@ -383,9 +429,12 @@ def inspect_job(
     evidence = JobEvidence(project.project.root, job_id)
     trials = failed_trials(evidence, trial_ids)
     reference = hosted_job_id(project, job_id) or job_id
+    waves = -(-len(trials) // max(1, concurrency))
+    ttl = min(MAX_FORK_KEY_SECONDS, waves * inspection_seconds(trials, depth) + 600)
+    (evidence.directory / FORK_LEDGER).unlink(missing_ok=True)
     with (
         one_inspection(evidence.directory),
-        fork_key(studio if depth != "quick" else None, reference) as key,
+        fork_key(studio if depth != "quick" else None, reference, ttl_seconds=ttl) as key,
     ):
         run = run_inspector(
             project,
@@ -403,9 +452,12 @@ def inspect_job(
     concluded: set[str] = set()
     spent = sum(float(item.metrics.get("cost_usd") or 0.0) for item in run.result.trials)
     by_trial = {run.tasks.get(key): value for key, value in run.states.items()}
+    reported = sum(float(state.get("spent_usd") or 0.0) for state in by_trial.values())
+    # Forks that timed out, or were still running when the Inspector stopped, spent
+    # what the ledger says, beyond what the Inspector saw.
+    spent += max(reported, fork_ledger(evidence.directory))
     for trial in trials:
         state = by_trial.get(trial.trial_id) or {}
-        spent += float(state.get("spent_usd") or 0.0)
         findings = [item for item in state.get("findings") or () if isinstance(item, dict)]
         if not findings:
             continue
