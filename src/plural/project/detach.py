@@ -1,7 +1,10 @@
 """Run a Job's runner in a Runtime sandbox, so a long run doesn't depend on this machine.
 
 ``plural run --detach`` packages the project, uploads it with this Plural to a
-sandbox, starts ``plural run`` there, and returns. The sandbox unpacks the
+sandbox the hosted project starts for one of its Daytona Runtimes, starts
+``plural run`` there, and returns. Only a Plural key is needed: the sandbox
+runs on Plural's account or the Runtime's stored credentials, which never
+leave the server, and every command and file goes through the hosted API. The sandbox unpacks the
 project into its own folder and never depends on this machine's paths or folder
 layout. The Job keeps its id: this machine plans it with a run id the sandbox
 reuses, and a Job's identity names its sources by content, not by path. The
@@ -75,6 +78,8 @@ class Detached:
     key_expires_at: str | None = None
     synced_at: str | None = None
     finished: bool = False
+    runtime: str | None = None
+    """The project Runtime the hosted project started the sandbox for."""
 
     def to_json(self) -> dict[str, Any]:
         """The record as written to ``detached.json``.
@@ -258,6 +263,7 @@ async def launch(
     key_expires_at: str | None = None,
     wait_seconds: float = 180,
     extra: Mapping[str, bytes] | None = None,
+    runtime: str | None = None,
 ) -> Detached:
     """Start the Job in a new sandbox and record where it runs.
 
@@ -338,6 +344,7 @@ async def launch(
         project=folder,
         started_at=_now(),
         key_expires_at=key_expires_at,
+        runtime=runtime,
     )
     _write(workspace, record)
     return record

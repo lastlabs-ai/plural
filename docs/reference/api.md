@@ -3202,6 +3202,14 @@ destroy(self, handle: 'SandboxHandle') -> 'None'
 
 Idempotently delete the remote sandbox.
 
+### plural.sandbox.DaytonaProvider.close
+
+```python
+close(self) -> 'None'
+```
+
+Close the client's connections, when it holds any.
+
 ### plural.sandbox.DaytonaProvider.version
 
 ```python

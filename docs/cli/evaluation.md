@@ -2140,12 +2140,17 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ --budget-usd                <float range> [x>=0]  At most what the Agents may spend on models.   │
 │                                                   Each Trial gets an even share as its cost      │
 │                                                   limit, and no Trial starts once it is spent.   │
-│ --detach                                          Run the Job in a Daytona sandbox instead of on │
-│                                                   this machine, and return. Its Environments     │
-│                                                   must use the local Runtime, which runs inside  │
-│                                                   the sandbox. It records the Job in the hosted  │
-│                                                   project as it runs. Follow it with plural job  │
-│                                                   show.                                          │
+│ --detach                                          Run the Job in a Daytona sandbox the hosted    │
+│                                                   project starts, instead of on this machine,    │
+│                                                   and return. Only a Plural key is needed. Its   │
+│                                                   Environments must use the local Runtime, which │
+│                                                   runs inside the sandbox. It records the Job in │
+│                                                   the hosted project as it runs. Follow it with  │
+│                                                   plural job show.                               │
+│ --runtime                   <str>                 With --detach: the project's Daytona Runtime   │
+│                                                   to start the sandbox for, on Plural's account  │
+│                                                   or its own stored credentials. Needed when it  │
+│                                                   has several.                                   │
 │ --json                                            Print machine-readable JSON.                   │
 │ --help                                            Show this message and exit.                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

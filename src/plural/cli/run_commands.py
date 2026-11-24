@@ -229,10 +229,17 @@ def run(
         False,
         "--detach",
         help=(
-            "Run the Job in a Daytona sandbox instead of on this machine, and return. Its "
-            "Environments must use the local Runtime, which runs inside the sandbox. It "
-            "records the Job in the hosted project as it runs. Follow it with plural job show."
+            "Run the Job in a Daytona sandbox the hosted project starts, instead of on this "
+            "machine, and return. Only a Plural key is needed. Its Environments must use the "
+            "local Runtime, which runs inside the sandbox. It records the Job in the hosted "
+            "project as it runs. Follow it with plural job show."
         ),
+    ),
+    runtime: str | None = typer.Option(
+        None,
+        "--runtime",
+        help="With --detach: the project's Daytona Runtime to start the sandbox for, on "
+        "Plural's account or its own stored credentials. Needed when it has several.",
     ),
     run_id: str | None = typer.Option(None, "--run-id", hidden=True),
     recorded_as: str | None = typer.Option(None, "--recorded-as", hidden=True),
@@ -254,6 +261,8 @@ def run(
     """
     if hosted or follow:
         raise ProjectError(HOSTED_RUNS)
+    if runtime and not detach:
+        raise ProjectError("--runtime picks where a detached run's sandbox starts; add --detach.")
     model, agent = _one(models, "--model"), _one(agents, "--agent")
     if tasks and len(tasks) > 1:
         raise ProjectError(
@@ -330,7 +339,16 @@ def run(
     if detach:
         if retained:
             raise ProjectError("--detach runs the project's own files; drop the @version.")
-        _detach(space, current, plan, request, environ, budget_usd=budget_usd, as_json=as_json)
+        _detach(
+            space,
+            current,
+            plan,
+            request,
+            environ,
+            budget_usd=budget_usd,
+            runtime=runtime,
+            as_json=as_json,
+        )
         return
     tracking = None
     if recorded_as:
@@ -394,10 +412,13 @@ def _detach(
     environ: Mapping[str, str],
     *,
     budget_usd: float | None,
+    runtime: str | None,
     as_json: bool,
 ) -> None:
     """Start the planned Job in a Daytona sandbox, recorded in the hosted project.
 
+    The hosted project starts the sandbox for one of its Daytona Runtimes and
+    relays every command and file, so no Daytona key or SDK is needed here.
     The hosted Job is created here, after the inputs are pushed, and the
     sandbox gets the project's binding and a key that records that Job and
     calls models for it, and nothing else.
@@ -412,6 +433,7 @@ def _detach(
     if detach.calls_models(plan):
         detach.refuse_unreachable(gateway)
     studio, binding = project_studio(space, current)
+    sandboxes = _detach_runtime(studio, runtime)
     pushed = push_run_inputs(space, studio, binding, plan)
     if pushed:
         _print_pushed(pushed, err=as_json)
@@ -452,13 +474,15 @@ def _detach(
         "--yes",
     ]
     typer.echo(
-        f"Detaching {plan.source} with {plan.agent.name} to a Daytona sandbox: "
-        f"{counted(len(plan.job.plan.trials), 'Trial')}"
+        f"Detaching {plan.source} with {plan.agent.name} to a Daytona sandbox for Runtime "
+        f"{sandboxes}: {counted(len(plan.job.plan.trials), 'Trial')}"
         + ", with a key that records this Job alone.",
         err=as_json,
     )
     try:
-        provider = DaytonaProvider(environ=environ)
+        provider = DaytonaProvider(
+            adapter=HostedDaytonaAdapter(studio, runtime=sandboxes, detached_job_id=client.job_id)
+        )
         launched = asyncio.run(
             _closing(
                 provider,
@@ -470,6 +494,7 @@ def _detach(
                     env=env,
                     key_expires_at=expires_at,
                     extra=extra,
+                    runtime=sandboxes,
                 ),
             )
         )
@@ -488,6 +513,42 @@ def _detach(
     )
 
 
+def _detach_runtime(studio: Studio, ref: str | None) -> str:
+    """The project Daytona Runtime a detached run's sandbox starts for.
+
+    Returns:
+        Its slug.
+
+    Raises:
+        ProjectError: When the project has none, several and none was named,
+            or the one named isn't a Daytona Runtime.
+    """
+    runtimes = studio.runtimes.list()
+    if ref is not None:
+        found = next((item for item in runtimes if ref in {item["slug"], item["id"]}), None)
+        if found is None:
+            raise ProjectError(f"This project has no Runtime {ref}. See plural runtime list.")
+        if found["provider"] != "daytona":
+            raise ProjectError(
+                f"Runtime {ref} starts {found['provider']} sandboxes; a detached run's "
+                "sandbox is a Daytona one."
+            )
+        return str(found["slug"])
+    daytona = [item for item in runtimes if item["provider"] == "daytona"]
+    if len(daytona) == 1:
+        return str(daytona[0]["slug"])
+    if not daytona:
+        raise ProjectError(
+            "A detached run's sandbox starts for one of the project's Daytona Runtimes, and "
+            "it has none. Add one: plural runtime create NAME --provider daytona, on "
+            "Plural's account (billed to credits) or with your own Daytona key."
+        )
+    names = ", ".join(sorted(str(item["slug"]) for item in daytona))
+    raise ProjectError(
+        f"This project has several Daytona Runtimes ({names}); pick one with --runtime."
+    )
+
+
 def _sync_detached(space: Workspace, job_id: str) -> None:
     """Copy a detached Job back from its sandbox; once it has finished, revoke its key."""
     from plural.project import detach
@@ -503,7 +564,12 @@ def _sync_detached(space: Workspace, job_id: str) -> None:
             studio, _ = project_studio(space, current)
             studio.jobs.end_runner_key(job_id)
 
-    provider = DaytonaProvider(environ=_run_environ(current))
+    if record.runtime is not None:
+        studio, _ = project_studio(space, current)
+        provider = DaytonaProvider(adapter=HostedDaytonaAdapter(studio, runtime=record.runtime))
+    else:
+        # Detached before the hosted project started its sandboxes.
+        provider = DaytonaProvider(environ=_run_environ(current))
     asyncio.run(
         _closing(provider, detach.sync(space, job_id, provider=provider, on_finish=finished))
     )

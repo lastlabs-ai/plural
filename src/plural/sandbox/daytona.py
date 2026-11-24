@@ -756,6 +756,12 @@ class DaytonaProvider(SandboxProvider):
         """Idempotently delete the remote sandbox."""
         await self.cancel(handle)
 
+    async def close(self) -> None:
+        """Close the client's connections, when it holds any."""
+        closer = getattr(self._adapter, "close", None)
+        if closer is not None:
+            await closer()
+
     async def version(self) -> str:
         """The installed Daytona SDK's version, which keys the conformance report."""
         try:
