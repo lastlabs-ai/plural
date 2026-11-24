@@ -25,6 +25,7 @@ from plural.inspector.app import ATTEMPTS, CREDENTIAL, FORK_LEDGER, FORKS_PER_TR
 from plural.inspector.causes import load_causes
 from plural.inspector.evidence import JobEvidence, TrialEvidence, failed_trials
 from plural.inspector.findings import (
+    ForkTest,
     InspectionRecord,
     load_findings,
     now,
@@ -477,6 +478,12 @@ def inspect_job(
             (item.name for item in load_causes(project.project.root) if item.agent),
         ),
         uninspected=tuple(item.trial_id for item in trials if item.trial_id not in concluded),
+        forks=tuple(
+            ForkTest.model_validate({"trial_id": trial_id, **test})
+            for trial_id, state in by_trial.items()
+            for test in state.get("tests") or ()
+            if isinstance(test, dict)
+        ),
         cost_usd=round(spent, 6),
     )
     save_findings(evidence.directory, record)

@@ -153,6 +153,7 @@ class ForkTest(FrozenModel):
     Attributes:
         test_id: The test's id within the inspection, such as ``X1``.
         job_id: The fork Job.
+        trial_id: The inspected Trial it forked.
         step: The step the forks continued after.
         remedy: The change to the Agent the candidates ran with.
         change: A diagnostic change's name, when the fork changed what the
@@ -174,6 +175,7 @@ class ForkTest(FrozenModel):
 
     test_id: str
     job_id: str
+    trial_id: str | None = None
     step: int
     remedy: Remedy | None = None
     change: str | None = None
@@ -259,6 +261,7 @@ class InspectionRecord(FrozenModel):
         findings: One per failed Trial the Inspector concluded on.
         uninspected: Failed Trials it recorded nothing for.
         cost_usd: What the Inspector and its forks cost.
+        forks: Every fork that finished, whether a Finding cites it or not.
     """
 
     job_id: str
@@ -269,6 +272,7 @@ class InspectionRecord(FrozenModel):
     findings: tuple[Finding, ...] = ()
     uninspected: tuple[str, ...] = ()
     cost_usd: float = 0.0
+    forks: tuple[ForkTest, ...] = ()
 
 
 def finding_status(

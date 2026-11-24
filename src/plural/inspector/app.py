@@ -563,7 +563,7 @@ class InspectorApp(App[InspectorState]):
                     )
 
         try:
-            running.test = run_fork(
+            test = run_fork(
                 self._root,
                 trial_id=self.state.trial_id,
                 test_id=running.test_id,
@@ -572,6 +572,7 @@ class InspectorApp(App[InspectorState]):
                 progress=finished,
                 **request,
             )
+            running.test = test.model_copy(update={"trial_id": self.state.trial_id})
         except Exception as exc:  # reported by fork_result
             running.error = str(exc) or type(exc).__name__
         finally:

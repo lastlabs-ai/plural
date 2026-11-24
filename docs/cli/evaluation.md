@@ -171,6 +171,7 @@ plural trial fork TRIAL_ID --step 4 --agent AGENT
 plural job inspect JOB_ID
 plural trial ask TRIAL_ID "Why did it hand off?"
 plural agent revise AGENT --from-finding F1
+plural agent revise AGENT --from-fork FORK_JOB_ID
 plural job report JOB_ID --compare OLD_JOB_ID
 plural review list
 plural review submit TRIAL_ID --verifier policy-review --score 2 \
@@ -411,7 +412,7 @@ This section is generated from the Typer application. Run `uv run python scripts
 │ delete    Delete a resource's local folder, refusing while other local resources use it.         │
 │ key       Print a new signing key for an external Agent.                                         │
 │ test      Send an external Agent a signed ping, and report how it answered.                      │
-│ revise    Apply a confirmed Finding's change to an Agent, as a new version.                      │
+│ revise    Apply a confirmed Finding's change, or a winning fork's, to an Agent as a new version. │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -573,22 +574,25 @@ This section is generated from the Typer application. Run `uv run python scripts
 
  Usage: plural agent revise [OPTIONS] {name}
 
- Apply a confirmed Finding's change to an Agent, as a new version.
+ Apply a confirmed Finding's change, or a winning fork's, to an Agent as a new version.
 
  The minor version goes up and CHANGELOG.md beside agent.yaml records the
- Finding and the forks that confirmed it. For an External Agent, whose code
- Plural can't change, fixes/F1.md is written for its team instead. Prove it
- with a Job on the dev Tasks, then the held-out Tasks, and
+ Finding and the forks that confirmed it. --from-fork ships the exact change
+ that fork tested, whether or not a Finding cites it. For an External Agent,
+ whose code Plural can't change, fixes/F1.md is written for its team
+ instead. Prove it with a Job on the dev Tasks, then the held-out Tasks, and
  plural job report NEW --compare OLD.
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    name      <str>  The Agent, by name. [required]                                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ *  --from-finding        <str>  A confirmed Finding, such as F1. [required]                      │
-│    --job                 <str>  The inspected Job; the latest one with the Finding by default.   │
-│    --json                       Print machine-readable JSON.                                     │
-│    --help                       Show this message and exit.                                      │
+│ --from-finding        <str>  A confirmed Finding, such as F1.                                    │
+│ --from-fork           <str>  A fork that beat its controls: its Job id, or its test id (X1) with │
+│                              --job.                                                              │
+│ --job                 <str>  The inspected Job; the latest one with the Finding by default.      │
+│ --json                       Print machine-readable JSON.                                        │
+│ --help                       Show this message and exit.                                         │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 

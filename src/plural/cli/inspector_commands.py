@@ -27,7 +27,7 @@ from plural.inspector.report import (
     save_report,
     write_summary,
 )
-from plural.inspector.revise import revise_agent
+from plural.inspector.revise import revise_agent, revise_from_fork
 from plural.inspector.run import DEFAULT_BUDGET_USD, ask_trial, inspect_job
 from plural.project import ProjectError, Workspace
 from plural.project.runs import finished_local_job
@@ -158,24 +158,36 @@ def job_report(
 @handled
 def agent_revise(
     name: str = typer.Argument(help="The Agent, by name."),
-    from_finding: str = typer.Option(
-        ..., "--from-finding", help="A confirmed Finding, such as F1."
+    from_finding: str | None = typer.Option(
+        None, "--from-finding", help="A confirmed Finding, such as F1."
+    ),
+    from_fork: str | None = typer.Option(
+        None,
+        "--from-fork",
+        help="A fork that beat its controls: its Job id, or its test id (X1) with --job.",
     ),
     job: str | None = typer.Option(
         None, "--job", help="The inspected Job; the latest one with the Finding by default."
     ),
     as_json: bool = JSON_OPTION,
 ) -> None:
-    """Apply a confirmed Finding's change to an Agent, as a new version.
+    """Apply a confirmed Finding's change, or a winning fork's, to an Agent as a new version.
 
     The minor version goes up and CHANGELOG.md beside agent.yaml records the
-    Finding and the forks that confirmed it. For an External Agent, whose code
-    Plural can't change, fixes/F1.md is written for its team instead. Prove it
-    with a Job on the dev Tasks, then the held-out Tasks, and
+    Finding and the forks that confirmed it. --from-fork ships the exact change
+    that fork tested, whether or not a Finding cites it. For an External Agent,
+    whose code Plural can't change, fixes/F1.md is written for its team
+    instead. Prove it with a Job on the dev Tasks, then the held-out Tasks, and
     plural job report NEW --compare OLD.
     """
+    if (from_finding is None) == (from_fork is None):
+        raise typer.BadParameter("Pass one of --from-finding and --from-fork.")
     space = current_workspace()
-    revision = revise_agent(space, name, from_finding, job_id=job)
+    revision = (
+        revise_from_fork(space, name, from_fork, job_id=job)
+        if from_fork is not None
+        else revise_agent(space, name, str(from_finding), job_id=job)
+    )
 
     def text() -> None:
         if revision.version is None:

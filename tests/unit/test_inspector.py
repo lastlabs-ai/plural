@@ -1037,3 +1037,73 @@ def test_the_inspector_has_time_for_forks_as_long_as_the_forked_trial(
         INSPECTOR_SECONDS + 2 * fork_seconds(limit, 4)
     )
     assert fork_seconds(6 * 3600, 4) > 1800
+
+
+def test_revise_ships_the_exact_remedy_a_winning_fork_tested(
+    failed_job: dict[str, Any], tmp_path: Path
+) -> None:
+    from plural.inspector.findings import InspectionRecord, now, save_findings
+    from plural.inspector.revise import revise_from_fork
+    from plural.project import Project, Workspace
+    from plural.project.layout import ProjectError
+
+    project = tmp_path / "wordle"
+    shutil.copytree(failed_job["project"], project)
+    space = Workspace(Project.at(project))
+    trial_id = failed_job["trials"]["nymph"]
+
+    def fork(test_id: str, job_id: str, **fields: Any) -> dict[str, Any]:
+        return {
+            "test_id": test_id,
+            "job_id": job_id,
+            "trial_id": trial_id,
+            "step": 2,
+            "verdict": "likely_matters",
+            "candidate": 1.0,
+            "control": 0.0,
+            "candidates": 4,
+            "controls": 4,
+            **fields,
+        }
+
+    record = InspectionRecord.model_validate(
+        {
+            "job_id": failed_job["job_id"],
+            "inspected_at": now(),
+            "forks": [
+                fork("X1", "job_won", remedy={"instructions": "Play Wordle. Use each clue."}),
+                fork(
+                    "X2", "job_lost", remedy={"model": "openai/gpt-5.6"}, verdict="no_clear_effect"
+                ),
+                fork("X3", "job_seen", change="context", payload={"mode": "restore"}),
+                fork("X1", "job_other", remedy={"model": "openai/gpt-5.6"}),
+            ],
+        }
+    )
+    save_findings(project / ".plural" / "jobs" / failed_job["job_id"], record)
+    with pytest.raises(ProjectError, match="names several forks"):
+        revise_from_fork(space, "scripted", "X1")
+    with pytest.raises(ProjectError, match="didn't beat its controls"):
+        revise_from_fork(space, "scripted", "job_lost")
+    with pytest.raises(ProjectError, match="nothing to ship"):
+        revise_from_fork(space, "scripted", "job_seen")
+    with pytest.raises(ProjectError, match="of scripted, not other"):
+        revise_from_fork(space, "other", "job_won")
+    revision = revise_from_fork(space, "scripted", "job_won")
+    assert (revision.previous, revision.version) == ("1.0.0", "1.1.0")
+    assert revision.fork_job_id == "job_won"
+    written = yaml.safe_load((project / "agents/scripted/agent.yaml").read_text())
+    assert written["instructions"] == "Play Wordle. Use each clue."
+    changelog = (project / "agents/scripted/CHANGELOG.md").read_text()
+    assert "From fork X1 (Job job_won)" in changelog
+    assert "passed 4 of 4, the controls 0 of 4" in changelog
+
+
+def test_agent_revise_takes_one_source(failed_job: dict[str, Any]) -> None:
+    from typer.testing import CliRunner
+
+    from plural.cli import app
+
+    result = CliRunner().invoke(app, ["agent", "revise", "scripted"])
+    assert result.exit_code != 0
+    assert "--from-finding and --from-fork" in result.output

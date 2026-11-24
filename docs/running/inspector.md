@@ -212,6 +212,16 @@ description in [`tool_overrides`](../project/agents.md#change-what-a-tool-says).
 comments at the top of `agent.yaml` are kept. `--job` picks the inspected Job when
 several hold an `F1`.
 
+```bash
+plural agent revise quote-bot --from-fork job_beac2b4f0a6151cd9cf2c091
+```
+
+`--from-fork` ships the exact remedy one fork tested, named by its fork Job id (or its
+test id, such as `X1`, with `--job`). The fork must have beaten its controls and changed
+the Agent itself, not what the Agent saw. Every fork an inspection finishes is kept in
+its record, so a winning fork no Finding cites can still be shipped. The changelog entry
+names the fork and its counts.
+
 A remedy changes the Agent for every Task, so the Inspector can't propose one that
 names the Task's own world: an account, a customer, a supplier, an item, or a value
 from its answer key. Those are the members of the App State's collections, the values
