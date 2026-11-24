@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-28T15:27:32Z",
+  "updated_at": "2026-11-24T00:31:16Z",
   "models": [
     {
       "id": "anthropic/claude-fable-5",
@@ -453,8 +453,8 @@
       "context_length": 1000000,
       "max_output_tokens": 131072,
       "pricing": {
-        "prompt": "0.00000021",
-        "completion": "0.00000056"
+        "prompt": "0.00000007",
+        "completion": "0.00000014"
       },
       "architecture": {
         "modality": "text->text",
@@ -478,8 +478,8 @@
           "region": "us",
           "upstream_id": "accounts/fireworks/models/deepseek-v4-flash-0731",
           "pricing": {
-            "prompt": "0.00000014",
-            "completion": "0.00000028"
+            "prompt": "0.00000007",
+            "completion": "0.00000014"
           }
         },
         {
@@ -520,8 +520,8 @@
       "context_length": 1000000,
       "max_output_tokens": 384000,
       "pricing": {
-        "prompt": "0.00000174",
-        "completion": "0.00000348"
+        "prompt": "0.00000191",
+        "completion": "0.00000383"
       },
       "architecture": {
         "modality": "text->text",
@@ -1062,13 +1062,13 @@
           "region": "us",
           "upstream_id": "gpt-5.6-sol-20260709",
           "pricing": {
-            "prompt": "0.000005",
-            "completion": "0.00003",
+            "prompt": "0.000004",
+            "completion": "0.00002",
             "tiers": [
               {
                 "min_prompt_tokens": 272000,
-                "prompt": "0.00001",
-                "completion": "0.000045"
+                "prompt": "0.000008",
+                "completion": "0.00003"
               }
             ]
           }
@@ -1288,13 +1288,13 @@
           "region": "us",
           "upstream_id": "gpt-5.6-sol-20260709",
           "pricing": {
-            "prompt": "0.000005",
-            "completion": "0.00003",
+            "prompt": "0.000004",
+            "completion": "0.00002",
             "tiers": [
               {
                 "min_prompt_tokens": 272000,
-                "prompt": "0.00001",
-                "completion": "0.000045"
+                "prompt": "0.000008",
+                "completion": "0.00003"
               }
             ],
             "cache_read": "0.0000005",
