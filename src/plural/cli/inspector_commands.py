@@ -85,7 +85,12 @@ def job_inspect(
         progress=_progress(as_json),
         studio=studio,
     )
-    hosted = _upload(space, lambda studio: upload_inspection(space, studio, record), job_id)
+    problems: list[str] = []
+    hosted = _upload(
+        space, lambda studio: upload_inspection(space, studio, record, problems), job_id
+    )
+    for problem in problems:
+        note(problem)
     payload = _inspection_view(record) | {"hosted_job_id": hosted}
     emit(payload, as_json=as_json, text=lambda: _print_inspection(record))
 

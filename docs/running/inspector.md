@@ -112,7 +112,12 @@ with forks off, or at `--depth quick`, the Inspector never records one.
 
 `plural job inspect` saves the Findings beside the Job as `findings.json`, and, for a
 Job you recorded, on the hosted Job, where the **Why it failed** tab shows the
-breakdown and each Finding.
+breakdown and each Finding. Each fork the inspection ran is recorded there too, as a
+Job with purpose `fork` linked to the inspected Job by `forked_from_job_id`, and each
+Finding links to the fork Trials that tested it. A changed Agent a fork ran is saved as
+a revision of the original Agent that doesn't become current. A fork Job that can't be
+recorded, such as one whose Agent uses a project Harness, is noted and skipped; the
+inspection is still saved.
 
 ### Depth and budget
 

@@ -154,6 +154,7 @@ class ForkTest(FrozenModel):
         test_id: The test's id within the inspection, such as ``X1``.
         job_id: The fork Job.
         trial_id: The inspected Trial it forked.
+        hosted_job_id: The fork Job in the hosted project, once it is recorded there.
         step: The step the forks continued after.
         remedy: The change to the Agent the candidates ran with.
         change: A diagnostic change's name, when the fork changed what the
@@ -176,6 +177,7 @@ class ForkTest(FrozenModel):
     test_id: str
     job_id: str
     trial_id: str | None = None
+    hosted_job_id: str | None = None
     step: int
     remedy: Remedy | None = None
     change: str | None = None

@@ -1107,3 +1107,95 @@ def test_agent_revise_takes_one_source(failed_job: dict[str, Any]) -> None:
     result = CliRunner().invoke(app, ["agent", "revise", "scripted"])
     assert result.exit_code != 0
     assert "--from-finding and --from-fork" in result.output
+
+
+def test_an_inspection_fork_is_recorded_as_a_fork_of_the_inspected_job(
+    failed_job: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from plural.inspector.experiments import remedy_agent
+    from plural.inspector.findings import Remedy
+    from plural.project import Project, Workspace, runs
+    from plural.project.forks import ForkRequest, plan_fork, trial_source
+    from plural.project.layout import ProjectError, ResourceRef
+    from plural.project.sync import HostedRevision
+
+    project = tmp_path / "wordle"
+    shutil.copytree(failed_job["project"], project)
+    space = Workspace(Project.at(project))
+    trial_id = failed_job["trials"]["nymph"]
+    source = trial_source(space, trial_id)
+    candidate = remedy_agent(source.agent, Remedy(instructions="Use each clue."), "X1")
+    spec, record = plan_fork(
+        space, ForkRequest(trial_id=trial_id, step=2, attempts=2, candidates=(candidate,))
+    )
+    control = source.agent
+
+    def revision(ref: ResourceRef) -> HostedRevision:
+        digest = control.agent.content_hash if ref.kind == "agent" else f"sha256:{ref.name}"
+        return HostedRevision(
+            resource_id=f"res-{ref.name}",
+            revision_id=f"rev-{ref.name}",
+            version=None,
+            content_hash=digest,
+            package_digest=None,
+        )
+
+    monkeypatch.setattr(
+        runs,
+        "resolve_pinned",
+        lambda _studio, inputs, job_id: {
+            ResourceRef.parse(key): revision(ResourceRef.parse(key)) for key in inputs
+        },
+    )
+    pushed: list[dict[str, Any]] = []
+    submitted: list[dict[str, Any]] = []
+
+    class Agents:
+        def push(self, value: Any, **options: Any) -> dict[str, Any]:
+            pushed.append({"name": value.name, **options})
+            return {"id": f"rev-{value.name}"}
+
+    class Jobs:
+        def submit(self, job: Any, **options: Any) -> dict[str, Any]:
+            submitted.append(options)
+            return {"id": "hosted-fork"}
+
+    class Studio:
+        agents = Agents()
+        jobs = Jobs()
+
+    with pytest.raises(ProjectError, match="was never recorded"):
+        runs.submit_client_job(space, Studio(), spec, record)  # type: ignore[arg-type]
+    original = project / ".plural" / "jobs" / failed_job["job_id"] / runs.RUN_RECORD
+    original.write_text(
+        json.dumps({**json.loads(original.read_text()), "hosted_job_id": "hosted-inspected"})
+    )
+    client = runs.submit_client_job(space, Studio(), spec, record)  # type: ignore[arg-type]
+    assert client.job_id == "hosted-fork"
+    assert submitted[0]["forked_from_job_id"] == "hosted-inspected"
+    assert len(submitted[0]["agent_revision_ids"]) == len(spec.agents)
+    assert f"rev-{control.name}" in submitted[0]["agent_revision_ids"]
+    assert pushed == [
+        {
+            "name": candidate.name,
+            "resource_id": f"res-{control.name}",
+            "current": False,
+            "lineage": [{"relation": "derived_from", "revision_id": f"rev-{control.name}"}],
+        }
+    ]
+
+
+def test_the_hosted_finding_names_each_recorded_fork_job() -> None:
+    from plural.inspector.hosted import _link_forks
+
+    fork = {"test_id": "X1", "job_id": "job_local"}
+    payload = _link_forks(
+        {
+            "forks": [fork, {"test_id": "X2", "job_id": "job_unrecorded"}],
+            "findings": [{"forks": [fork]}],
+        },
+        {"job_local": "hosted-fork"},
+    )
+    assert payload["forks"][0]["hosted_job_id"] == "hosted-fork"
+    assert "hosted_job_id" not in payload["forks"][1]
+    assert payload["findings"][0]["forks"][0]["hosted_job_id"] == "hosted-fork"

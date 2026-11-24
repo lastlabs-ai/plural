@@ -10,10 +10,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import httpx
+
+from plural.errors import PluralError
 from plural.inspector.findings import InspectionRecord
 from plural.inspector.report import JobReport
+from plural.project.layout import ProjectError
 from plural.project.resources import Workspace
-from plural.project.runs import RUN_RECORD, local_job_spec
+from plural.project.runs import RUN_RECORD, local_job_spec, push_local_job
 from plural.studio import Studio
 
 
@@ -63,6 +67,17 @@ def _object(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _link_forks(payload: dict[str, Any], forks: dict[str, str]) -> dict[str, Any]:
+    def link(test: dict[str, Any]) -> dict[str, Any]:
+        hosted = forks.get(str(test.get("job_id")))
+        return {**test, "hosted_job_id": hosted} if hosted else test
+
+    payload["forks"] = [link(test) for test in payload.get("forks") or ()]
+    for item in payload.get("findings") or ():
+        item["forks"] = [link(test) for test in item.get("forks") or ()]
+    return payload
+
+
 def _translate(value: Any, ids: dict[str, str]) -> Any:
     if isinstance(value, str):
         return ids.get(value, value)
@@ -73,8 +88,40 @@ def _translate(value: Any, ids: dict[str, str]) -> Any:
     return value
 
 
-def upload_inspection(workspace: Workspace, studio: Studio, record: InspectionRecord) -> str | None:
+def record_forks(
+    workspace: Workspace, studio: Studio, record: InspectionRecord
+) -> tuple[dict[str, str], list[str]]:
+    """Record each fork Job an inspection ran, as a fork of the hosted Job it inspected.
+
+    Returns:
+        The hosted fork Job by local fork Job id, and what couldn't be recorded.
+    """
+    forks = {test.job_id for test in record.forks} | {
+        test.job_id for item in record.findings for test in item.forks
+    }
+    recorded: dict[str, str] = {}
+    problems: list[str] = []
+    for job_id in sorted(forks):
+        if not (workspace.project.jobs_dir / job_id / RUN_RECORD).is_file():
+            continue
+        try:
+            recorded[job_id] = push_local_job(workspace, studio, job_id).job.job_id
+        except (PluralError, ProjectError, httpx.HTTPError) as exc:
+            problems.append(f"fork Job {job_id} wasn't recorded: {exc}")
+    return recorded, problems
+
+
+def upload_inspection(
+    workspace: Workspace,
+    studio: Studio,
+    record: InspectionRecord,
+    problems: list[str] | None = None,
+) -> str | None:
     """Replace the hosted Job's inspection, when the Job was recorded.
+
+    Each fork Job is recorded first, linked to the inspected Job, so its
+    Findings open the fork Trials that tested them. What couldn't be recorded
+    is added to ``problems``.
 
     Returns:
         The hosted Job id, or ``None`` when the Job isn't recorded.
@@ -82,8 +129,11 @@ def upload_inspection(workspace: Workspace, studio: Studio, record: InspectionRe
     hosted = hosted_job_id(workspace, record.job_id)
     if hosted is None:
         return None
+    forks, failed = record_forks(workspace, studio, record)
+    if problems is not None:
+        problems.extend(failed)
     ids = hosted_trial_ids(workspace, studio, record.job_id, hosted)
-    payload = _translate(record.model_dump(mode="json"), ids)
+    payload = _translate(_link_forks(record.model_dump(mode="json"), forks), ids)
     payload["job_id"] = hosted
     studio.jobs.put_inspection(hosted, payload)
     return hosted
@@ -110,4 +160,10 @@ def upload_report(workspace: Workspace, studio: Studio, report: JobReport) -> st
     return hosted
 
 
-__all__ = ["hosted_job_id", "hosted_trial_ids", "upload_inspection", "upload_report"]
+__all__ = [
+    "hosted_job_id",
+    "hosted_trial_ids",
+    "record_forks",
+    "upload_inspection",
+    "upload_report",
+]
