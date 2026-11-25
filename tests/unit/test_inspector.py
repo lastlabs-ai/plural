@@ -1104,7 +1104,8 @@ def test_agent_revise_takes_one_source(failed_job: dict[str, Any]) -> None:
 
     from plural.cli import app
 
-    result = CliRunner().invoke(app, ["agent", "revise", "scripted"])
+    runner = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb", "COLUMNS": "120"})
+    result = runner.invoke(app, ["agent", "revise", "scripted"])
     assert result.exit_code != 0
     assert "--from-finding and --from-fork" in result.output
 
