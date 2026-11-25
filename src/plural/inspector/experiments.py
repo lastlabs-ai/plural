@@ -9,22 +9,20 @@ comparison :func:`plural.stats.compare_fork` computes.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from plural.agents import AgentBinding
 from plural.agents.models import without_context
+from plural.inspector.app import FORK_CONCURRENCY
 from plural.inspector.evidence import trial_passed
 from plural.inspector.findings import ForkTest, Remedy
-from plural.jobs import TrialResult
+from plural.jobs import TrialResult, TrialSpec
 from plural.project.forks import ForkRequest, fork_local_trial, fork_results, trial_source
 from plural.project.layout import Project
 from plural.project.resources import Workspace
 from plural.stats import ForkComparison
-
-FORK_CONCURRENCY = 4
-"""How many forks of one test run at once."""
 
 
 def remedy_agent(binding: AgentBinding, remedy: Remedy, label: str) -> AgentBinding:
@@ -64,10 +62,12 @@ def run_fork(
     test_id: str,
     environ: Mapping[str, str],
     gates: Sequence[str] = (),
+    progress: Callable[[TrialSpec, TrialResult], None] | None = None,
 ) -> ForkTest:
     """Run one fork test of a local Trial and compare the candidates with the controls.
 
-    With ``gates``, each side is judged on those gates alone.
+    With ``gates``, each side is judged on those gates alone. ``progress`` is
+    called as each of its Trials finishes.
 
     Returns:
         The test and its verdict.
@@ -84,7 +84,9 @@ def run_fork(
         candidates=candidates,
         concurrency=FORK_CONCURRENCY,
     )
-    job_id, result, spec = fork_local_trial(workspace, request, environ=environ, source=source)
+    job_id, result, spec = fork_local_trial(
+        workspace, request, environ=environ, source=source, progress=progress
+    )
     outcome = fork_results(spec, result, source.passed, gates)
     comparison = next(iter(outcome["candidates"].values()), {"verdict": "too_few"})
     cost = sum(float(item.metrics.get("cost_usd") or 0.0) for item in result.trials)

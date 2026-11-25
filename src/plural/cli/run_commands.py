@@ -44,6 +44,7 @@ from plural.cli.common import (
 from plural.cli.credential_commands import account_credential_source, stored_credentials
 from plural.cli.credits import CreditWatch
 from plural.cli.runtime_commands import _project_studio
+from plural.config import is_local_url
 from plural.errors import PluralError
 from plural.execution.bootstrap import RUNTIME_VERSION_VARIABLE
 from plural.execution.episode_server import EpisodeServerOptions
@@ -228,10 +229,17 @@ def run(
         False,
         "--detach",
         help=(
-            "Run the Job in a Daytona sandbox instead of on this machine, and return. Its "
-            "Environments must use the local Runtime, which runs inside the sandbox. It "
-            "records the Job in the hosted project as it runs. Follow it with plural job show."
+            "Run the Job in a Daytona sandbox the hosted project starts, instead of on this "
+            "machine, and return. Only a Plural key is needed. Its Environments must use the "
+            "local Runtime, which runs inside the sandbox. It records the Job in the hosted "
+            "project as it runs. Follow it with plural job show."
         ),
+    ),
+    runtime: str | None = typer.Option(
+        None,
+        "--runtime",
+        help="With --detach: the project's Daytona Runtime to start the sandbox for, on "
+        "Plural's account or its own stored credentials. Needed when it has several.",
     ),
     run_id: str | None = typer.Option(None, "--run-id", hidden=True),
     recorded_as: str | None = typer.Option(None, "--recorded-as", hidden=True),
@@ -253,6 +261,8 @@ def run(
     """
     if hosted or follow:
         raise ProjectError(HOSTED_RUNS)
+    if runtime and not detach:
+        raise ProjectError("--runtime picks where a detached run's sandbox starts; add --detach.")
     model, agent = _one(models, "--model"), _one(agents, "--agent")
     if tasks and len(tasks) > 1:
         raise ProjectError(
@@ -269,7 +279,7 @@ def run(
     record = _recording(record, track) or bool(evaluation_track and not dry_run)
     space = workspace()
     current = session()
-    environ = _run_environ(current)
+    environ = _run_environ(current, space)
     if plural_version:
         environ[RUNTIME_VERSION_VARIABLE] = plural_version
     task, task_version = _split(task, TASK.label)
@@ -329,7 +339,16 @@ def run(
     if detach:
         if retained:
             raise ProjectError("--detach runs the project's own files; drop the @version.")
-        _detach(space, current, plan, request, environ, budget_usd=budget_usd, as_json=as_json)
+        _detach(
+            space,
+            current,
+            plan,
+            request,
+            environ,
+            budget_usd=budget_usd,
+            runtime=runtime,
+            as_json=as_json,
+        )
         return
     tracking = None
     if recorded_as:
@@ -393,10 +412,13 @@ def _detach(
     environ: Mapping[str, str],
     *,
     budget_usd: float | None,
+    runtime: str | None,
     as_json: bool,
 ) -> None:
     """Start the planned Job in a Daytona sandbox, recorded in the hosted project.
 
+    The hosted project starts the sandbox for one of its Daytona Runtimes and
+    relays every command and file, so no Daytona key or SDK is needed here.
     The hosted Job is created here, after the inputs are pushed, and the
     sandbox gets the project's binding and a key that records that Job and
     calls models for it, and nothing else.
@@ -411,6 +433,7 @@ def _detach(
     if detach.calls_models(plan):
         detach.refuse_unreachable(gateway)
     studio, binding = project_studio(space, current)
+    sandboxes = _detach_runtime(studio, runtime)
     pushed = push_run_inputs(space, studio, binding, plan)
     if pushed:
         _print_pushed(pushed, err=as_json)
@@ -451,13 +474,15 @@ def _detach(
         "--yes",
     ]
     typer.echo(
-        f"Detaching {plan.source} with {plan.agent.name} to a Daytona sandbox: "
-        f"{counted(len(plan.job.plan.trials), 'Trial')}"
+        f"Detaching {plan.source} with {plan.agent.name} to a Daytona sandbox for Runtime "
+        f"{sandboxes}: {counted(len(plan.job.plan.trials), 'Trial')}"
         + ", with a key that records this Job alone.",
         err=as_json,
     )
     try:
-        provider = DaytonaProvider(environ=environ)
+        provider = DaytonaProvider(
+            adapter=HostedDaytonaAdapter(studio, runtime=sandboxes, detached_job_id=client.job_id)
+        )
         launched = asyncio.run(
             _closing(
                 provider,
@@ -469,6 +494,7 @@ def _detach(
                     env=env,
                     key_expires_at=expires_at,
                     extra=extra,
+                    runtime=sandboxes,
                 ),
             )
         )
@@ -487,6 +513,42 @@ def _detach(
     )
 
 
+def _detach_runtime(studio: Studio, ref: str | None) -> str:
+    """The project Daytona Runtime a detached run's sandbox starts for.
+
+    Returns:
+        Its slug.
+
+    Raises:
+        ProjectError: When the project has none, several and none was named,
+            or the one named isn't a Daytona Runtime.
+    """
+    runtimes = studio.runtimes.list()
+    if ref is not None:
+        found = next((item for item in runtimes if ref in {item["slug"], item["id"]}), None)
+        if found is None:
+            raise ProjectError(f"This project has no Runtime {ref}. See plural runtime list.")
+        if found["provider"] != "daytona":
+            raise ProjectError(
+                f"Runtime {ref} starts {found['provider']} sandboxes; a detached run's "
+                "sandbox is a Daytona one."
+            )
+        return str(found["slug"])
+    daytona = [item for item in runtimes if item["provider"] == "daytona"]
+    if len(daytona) == 1:
+        return str(daytona[0]["slug"])
+    if not daytona:
+        raise ProjectError(
+            "A detached run's sandbox starts for one of the project's Daytona Runtimes, and "
+            "it has none. Add one: plural runtime create NAME --provider daytona, on "
+            "Plural's account (billed to credits) or with your own Daytona key."
+        )
+    names = ", ".join(sorted(str(item["slug"]) for item in daytona))
+    raise ProjectError(
+        f"This project has several Daytona Runtimes ({names}); pick one with --runtime."
+    )
+
+
 def _sync_detached(space: Workspace, job_id: str) -> None:
     """Copy a detached Job back from its sandbox; once it has finished, revoke its key."""
     from plural.project import detach
@@ -502,7 +564,12 @@ def _sync_detached(space: Workspace, job_id: str) -> None:
             studio, _ = project_studio(space, current)
             studio.jobs.end_runner_key(job_id)
 
-    provider = DaytonaProvider(environ=_run_environ(current))
+    if record.runtime is not None:
+        studio, _ = project_studio(space, current)
+        provider = DaytonaProvider(adapter=HostedDaytonaAdapter(studio, runtime=record.runtime))
+    else:
+        # Detached before the hosted project started its sandboxes.
+        provider = DaytonaProvider(environ=_run_environ(current))
     asyncio.run(
         _closing(provider, detach.sync(space, job_id, provider=provider, on_finish=finished))
     )
@@ -808,7 +875,7 @@ def job_rerun(
     if (space.project.jobs_dir / job_id).is_dir():
         tracking = _tracking(space, session()) if _recording(record, track) else None
         environ = _project_secrets(
-            space, local_job_spec(space, job_id), _run_environ(session()), err=as_json
+            space, local_job_spec(space, job_id), _run_environ(session(), space), err=as_json
         )
         with _credit_watch(session(), environ, err=as_json):
             new_id, result = rerun_local_job(
@@ -871,7 +938,7 @@ def trial_rerun(
     if owner is not None:
         tracking = _tracking(space, session()) if _recording(record, track) else None
         environ = _project_secrets(
-            space, local_job_spec(space, owner), _run_environ(session()), err=as_json
+            space, local_job_spec(space, owner), _run_environ(session(), space), err=as_json
         )
         with _credit_watch(session(), environ, err=as_json):
             new_id, result = rerun_local_trial(
@@ -937,7 +1004,7 @@ def trial_resume(
     space = workspace()
     job_id, _ = find_local_trial(space, trial_id)
     environ = _project_secrets(
-        space, local_job_spec(space, job_id), _run_environ(session()), err=as_json
+        space, local_job_spec(space, job_id), _run_environ(session(), space), err=as_json
     )
     with _credit_watch(session(), environ, err=as_json):
         job_id, result, resumed = resume_local_trial(
@@ -1099,7 +1166,7 @@ def trial_fork(
         hosted_trial_id=hosted,
     )
     tracking = _tracking(here, session()) if recording else None
-    environ = _project_secrets(here, source.spec, _run_environ(session()), err=as_json)
+    environ = _project_secrets(here, source.spec, _run_environ(session(), here), err=as_json)
     with _credit_watch(session(), environ, err=as_json):
         job_id, result, spec = fork_local_trial(
             space,
@@ -1450,7 +1517,7 @@ def _project_secrets(
     return environ
 
 
-def _run_environ(current: Session) -> dict[str, str]:
+def _run_environ(current: Session, space: Workspace | None = None) -> dict[str, str]:
     """Process environment for a local run, with the gateway credential added.
 
     Every model call goes through the gateway, which accepts API keys, not the
@@ -1461,7 +1528,43 @@ def _run_environ(current: Session) -> dict[str, str]:
         environ["PLURAL_API_KEY"] = current.api_key
     if environ.get("PLURAL_API_KEY"):
         environ.setdefault("PLURAL_GATEWAY_URL", current.api_url.rstrip("/") + "/v1")
+    if space is not None:
+        _stale_gateway(space, current, environ)
     return environ
+
+
+def _stale_gateway(space: Workspace, current: Session, environ: dict[str, str]) -> None:
+    """Warn when ``PLURAL_GATEWAY_URL`` is on this machine but the project is hosted.
+
+    A gateway left over from local development rejects the hosted key on every
+    call. When the session is signed in to the bound platform, its gateway is
+    used instead.
+    """
+    gateway = environ.get("PLURAL_GATEWAY_URL")
+    try:
+        binding = space.project.read_binding()
+    except ProjectError:
+        return
+    if not gateway or binding is None or not is_local_url(gateway):
+        return
+    bound = binding.api_url.rstrip("/")
+    if is_local_url(bound):
+        return
+    if current.api_url.rstrip("/") == bound:
+        environ["PLURAL_GATEWAY_URL"] = f"{bound}/v1"
+        typer.echo(
+            f"! PLURAL_GATEWAY_URL is {gateway}, on this machine, but this project is "
+            f"bound to {bound}. Using {bound}/v1 instead; unset PLURAL_GATEWAY_URL to "
+            "stop this warning.",
+            err=True,
+        )
+        return
+    typer.echo(
+        f"! PLURAL_GATEWAY_URL is {gateway}, on this machine, but this project is bound "
+        f"to {bound} and you are signed in to {current.api_url}. Its model calls go to "
+        "the local gateway.",
+        err=True,
+    )
 
 
 def _recording(record: bool, track: bool) -> bool:

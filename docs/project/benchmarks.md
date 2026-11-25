@@ -255,7 +255,9 @@ heldout: [triage-002, triage-005]
 
 List some of the Benchmark's Tasks under `heldout`, such as a third of them, with
 about the same share from each category. The rest are the **development** Tasks. A
-Benchmark whose every Task is held out is refused.
+Benchmark whose every Task is held out is refused. Hold out at least 10: a proof's
+paired verdict needs 10 shared Tasks, so on fewer it always reads not enough data, and
+`plural benchmark validate` warns about it.
 
 Held out means untouched. Hold out Tasks no run, inspection, fork, or revision has
 seen, usually new ones. A Task that has already run can't become held out: the hosted

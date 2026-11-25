@@ -931,3 +931,272 @@ def test_the_bench_never_runs_a_held_out_task() -> None:
     manifest = yaml.safe_load((source / "benchmarks/quoting/benchmark.yaml").read_text("utf-8"))
     picked = {task for tasks in _categories(source).values() for task in tasks}
     assert picked and not picked & set(manifest["heldout"])
+
+
+class _Finished:
+    def __init__(self, trial_id: str, cost: float) -> None:
+        self.trial_id = trial_id
+        self.metrics = {"cost_usd": cost}
+
+
+def _forking(failed_job: dict[str, Any], monkeypatch: pytest.MonkeyPatch, run: Any) -> Any:
+    from plural.inspector import experiments
+    from plural.inspector.app import CREDENTIAL
+
+    monkeypatch.setenv(CREDENTIAL, "test")
+    monkeypatch.setattr(experiments, "run_fork", run)
+    return _app(failed_job, depth="standard", budget_usd=5.0)
+
+
+def test_a_fork_runs_in_the_background_and_fork_result_records_it(
+    failed_job: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from plural.inspector.app import FORK_LEDGER, fork_seconds
+    from plural.inspector.evidence import JobEvidence
+    from plural.inspector.findings import ForkTest
+
+    def run(*_args: Any, progress: Any, test_id: str, **_kwargs: Any) -> ForkTest:
+        for index in range(8):
+            progress(None, _Finished(f"t{index}", 0.01))
+        return ForkTest(
+            test_id=test_id,
+            job_id="job_fork",
+            step=2,
+            verdict="likely_matters",
+            candidate=1.0,
+            control=0.0,
+            candidates=4,
+            controls=4,
+            cost_usd=0.08,
+        )
+
+    app = _forking(failed_job, monkeypatch, run)
+    trial = app._trial()
+    started = app.fork(step=2, instructions="Read every clue before guessing.")
+    assert started["status"] == "running"
+    assert started["deadline_seconds"] == round(
+        fork_seconds(trial.task.environment.limits.max_seconds, 4)
+    )
+    done = app.fork_result(started["test_id"], wait_seconds=10)
+    assert done["status"] == "done"
+    assert done["beat_controls"]
+    assert [item["test_id"] for item in app.state.tests] == ["X1"]
+    assert app.state.spent_usd == pytest.approx(0.08)
+    again = app.fork_result("X1", wait_seconds=0)
+    assert again["status"] == "done"
+    assert app.state.spent_usd == pytest.approx(0.08)
+    ledger = JobEvidence(failed_job["project"], failed_job["job_id"]).directory / FORK_LEDGER
+    assert len(ledger.read_text("utf-8").splitlines()) == 8
+    ledger.unlink()
+
+
+def test_a_timed_out_fork_still_records_what_its_trials_spent(
+    failed_job: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    from plural.inspector import app as module
+    from plural.inspector.evidence import JobEvidence
+    from plural.inspector.run import fork_ledger
+
+    release = threading.Event()
+
+    def run(*_args: Any, progress: Any, **_kwargs: Any) -> None:
+        progress(None, _Finished("t0", 0.03))
+        release.wait(10)
+        raise RuntimeError("stopped")
+
+    monkeypatch.setattr(module, "fork_seconds", lambda *_args: 0.2)
+    app = _forking(failed_job, monkeypatch, run)
+    started = app.fork(step=2, instructions="Read every clue before guessing.")
+    assert app.fork_result(started["test_id"], wait_seconds=0)["status"] == "running"
+    out = app.fork_result(started["test_id"], wait_seconds=1)
+    assert out["status"] == "timed_out"
+    assert out["finished_trials"] == 1
+    assert app.state.spent_usd == pytest.approx(0.03)
+    assert app.state.tests == []
+    release.set()
+    directory = JobEvidence(failed_job["project"], failed_job["job_id"]).directory
+    assert fork_ledger(directory) == pytest.approx(0.03)
+    (directory / module.FORK_LEDGER).unlink()
+
+
+def test_the_inspector_has_time_for_forks_as_long_as_the_forked_trial(
+    failed_job: dict[str, Any],
+) -> None:
+    from plural.inspector.app import fork_seconds
+    from plural.inspector.evidence import JobEvidence
+    from plural.inspector.run import INSPECTOR_SECONDS, inspection_seconds
+
+    trial = JobEvidence(failed_job["project"], failed_job["job_id"]).trial(
+        failed_job["trials"]["nymph"]
+    )
+    limit = trial.task.environment.limits.max_seconds
+    assert inspection_seconds([trial], "quick") == INSPECTOR_SECONDS
+    assert inspection_seconds([trial], "standard") == int(
+        INSPECTOR_SECONDS + 2 * fork_seconds(limit, 4)
+    )
+    assert fork_seconds(6 * 3600, 4) > 1800
+
+
+def test_revise_ships_the_exact_remedy_a_winning_fork_tested(
+    failed_job: dict[str, Any], tmp_path: Path
+) -> None:
+    from plural.inspector.findings import InspectionRecord, now, save_findings
+    from plural.inspector.revise import revise_from_fork
+    from plural.project import Project, Workspace
+    from plural.project.layout import ProjectError
+
+    project = tmp_path / "wordle"
+    shutil.copytree(failed_job["project"], project)
+    space = Workspace(Project.at(project))
+    trial_id = failed_job["trials"]["nymph"]
+
+    def fork(test_id: str, job_id: str, **fields: Any) -> dict[str, Any]:
+        return {
+            "test_id": test_id,
+            "job_id": job_id,
+            "trial_id": trial_id,
+            "step": 2,
+            "verdict": "likely_matters",
+            "candidate": 1.0,
+            "control": 0.0,
+            "candidates": 4,
+            "controls": 4,
+            **fields,
+        }
+
+    record = InspectionRecord.model_validate(
+        {
+            "job_id": failed_job["job_id"],
+            "inspected_at": now(),
+            "forks": [
+                fork("X1", "job_won", remedy={"instructions": "Play Wordle. Use each clue."}),
+                fork(
+                    "X2", "job_lost", remedy={"model": "openai/gpt-5.6"}, verdict="no_clear_effect"
+                ),
+                fork("X3", "job_seen", change="context", payload={"mode": "restore"}),
+                fork("X1", "job_other", remedy={"model": "openai/gpt-5.6"}),
+            ],
+        }
+    )
+    save_findings(project / ".plural" / "jobs" / failed_job["job_id"], record)
+    with pytest.raises(ProjectError, match="names several forks"):
+        revise_from_fork(space, "scripted", "X1")
+    with pytest.raises(ProjectError, match="didn't beat its controls"):
+        revise_from_fork(space, "scripted", "job_lost")
+    with pytest.raises(ProjectError, match="nothing to ship"):
+        revise_from_fork(space, "scripted", "job_seen")
+    with pytest.raises(ProjectError, match="of scripted, not other"):
+        revise_from_fork(space, "other", "job_won")
+    revision = revise_from_fork(space, "scripted", "job_won")
+    assert (revision.previous, revision.version) == ("1.0.0", "1.1.0")
+    assert revision.fork_job_id == "job_won"
+    written = yaml.safe_load((project / "agents/scripted/agent.yaml").read_text())
+    assert written["instructions"] == "Play Wordle. Use each clue."
+    changelog = (project / "agents/scripted/CHANGELOG.md").read_text()
+    assert "From fork X1 (Job job_won)" in changelog
+    assert "passed 4 of 4, the controls 0 of 4" in changelog
+
+
+def test_agent_revise_takes_one_source(failed_job: dict[str, Any]) -> None:
+    from typer.testing import CliRunner
+
+    from plural.cli import app
+
+    runner = CliRunner(env={"NO_COLOR": "1", "TERM": "dumb", "COLUMNS": "120"})
+    result = runner.invoke(app, ["agent", "revise", "scripted"])
+    assert result.exit_code != 0
+    assert "--from-finding and --from-fork" in result.output
+
+
+def test_an_inspection_fork_is_recorded_as_a_fork_of_the_inspected_job(
+    failed_job: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from plural.inspector.experiments import remedy_agent
+    from plural.inspector.findings import Remedy
+    from plural.project import Project, Workspace, runs
+    from plural.project.forks import ForkRequest, plan_fork, trial_source
+    from plural.project.layout import ProjectError, ResourceRef
+    from plural.project.sync import HostedRevision
+
+    project = tmp_path / "wordle"
+    shutil.copytree(failed_job["project"], project)
+    space = Workspace(Project.at(project))
+    trial_id = failed_job["trials"]["nymph"]
+    source = trial_source(space, trial_id)
+    candidate = remedy_agent(source.agent, Remedy(instructions="Use each clue."), "X1")
+    spec, record = plan_fork(
+        space, ForkRequest(trial_id=trial_id, step=2, attempts=2, candidates=(candidate,))
+    )
+    control = source.agent
+
+    def revision(ref: ResourceRef) -> HostedRevision:
+        digest = control.agent.content_hash if ref.kind == "agent" else f"sha256:{ref.name}"
+        return HostedRevision(
+            resource_id=f"res-{ref.name}",
+            revision_id=f"rev-{ref.name}",
+            version=None,
+            content_hash=digest,
+            package_digest=None,
+        )
+
+    monkeypatch.setattr(
+        runs,
+        "resolve_pinned",
+        lambda _studio, inputs, job_id: {
+            ResourceRef.parse(key): revision(ResourceRef.parse(key)) for key in inputs
+        },
+    )
+    pushed: list[dict[str, Any]] = []
+    submitted: list[dict[str, Any]] = []
+
+    class Agents:
+        def push(self, value: Any, **options: Any) -> dict[str, Any]:
+            pushed.append({"name": value.name, **options})
+            return {"id": f"rev-{value.name}"}
+
+    class Jobs:
+        def submit(self, job: Any, **options: Any) -> dict[str, Any]:
+            submitted.append(options)
+            return {"id": "hosted-fork"}
+
+    class Studio:
+        agents = Agents()
+        jobs = Jobs()
+
+    with pytest.raises(ProjectError, match="was never recorded"):
+        runs.submit_client_job(space, Studio(), spec, record)  # type: ignore[arg-type]
+    original = project / ".plural" / "jobs" / failed_job["job_id"] / runs.RUN_RECORD
+    original.write_text(
+        json.dumps({**json.loads(original.read_text()), "hosted_job_id": "hosted-inspected"})
+    )
+    client = runs.submit_client_job(space, Studio(), spec, record)  # type: ignore[arg-type]
+    assert client.job_id == "hosted-fork"
+    assert submitted[0]["forked_from_job_id"] == "hosted-inspected"
+    assert len(submitted[0]["agent_revision_ids"]) == len(spec.agents)
+    assert f"rev-{control.name}" in submitted[0]["agent_revision_ids"]
+    assert pushed == [
+        {
+            "name": candidate.name,
+            "resource_id": f"res-{control.name}",
+            "current": False,
+            "lineage": [{"relation": "derived_from", "revision_id": f"rev-{control.name}"}],
+        }
+    ]
+
+
+def test_the_hosted_finding_names_each_recorded_fork_job() -> None:
+    from plural.inspector.hosted import _link_forks
+
+    fork = {"test_id": "X1", "job_id": "job_local"}
+    payload = _link_forks(
+        {
+            "forks": [fork, {"test_id": "X2", "job_id": "job_unrecorded"}],
+            "findings": [{"forks": [fork]}],
+        },
+        {"job_local": "hosted-fork"},
+    )
+    assert payload["forks"][0]["hosted_job_id"] == "hosted-fork"
+    assert "hosted_job_id" not in payload["forks"][1]
+    assert payload["findings"][0]["forks"][0]["hosted_job_id"] == "hosted-fork"

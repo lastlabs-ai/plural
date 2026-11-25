@@ -37,6 +37,7 @@ from plural.project.layout import (
 )
 from plural.project.manifests import read_yaml_mapping
 from plural.project.resources import Workspace, _package_files
+from plural.stats import MIN_SHARED_TASKS
 
 CHECKS_DIRECTORY = Path(".plural") / "checks"
 PROBE_MODEL = "openai/gpt-5.6-luna"
@@ -53,10 +54,12 @@ class CheckPlan:
         canaries: Each Task's Benchmark canaries.
         references: Each Task's reference policy as ``path.py:function``.
         skipped: Tasks that cannot be checked, with why.
+        heldout: How many Tasks the Benchmark holds out; ``None`` without one.
     """
 
     tasks: list[str]
     threshold: float = 1.0
+    heldout: int | None = None
     canaries: dict[str, tuple[str, ...]] = field(default_factory=dict)
     references: dict[str, str] = field(default_factory=dict)
     skipped: dict[str, str] = field(default_factory=dict)
@@ -125,10 +128,12 @@ def plan_checks(
     """
     project = workspace.project
     threshold = 1.0
+    heldout: int | None = None
     if benchmark is not None:
         value = workspace.load(ResourceRef(BENCHMARK.name, benchmark)).value
         members = [task.name for task in value.tasks]
         threshold = float(value.scoring.success_threshold)
+        heldout = len(value.heldout)
         missing = [name for name in tasks if name not in members]
         if missing:
             raise ProjectError(f"{', '.join(missing)} not in Benchmark {benchmark!r}.")
@@ -147,6 +152,7 @@ def plan_checks(
     plan = CheckPlan(
         tasks=[],
         threshold=threshold,
+        heldout=heldout,
         canaries={name: tuple(values) for name, values in canaries.items()},
     )
     for name in names:
@@ -508,6 +514,7 @@ def check_report(
         CheckSection(title="Graders", lines=tuple(_grader_lines(present, plan.skipped))),
         CheckSection(title="Leaks", lines=tuple(_leak_lines(present))),
         CheckSection(title="Trust", lines=tuple(_isolation_lines(workspace, plan.tasks, environ))),
+        *_heldout_sections(plan.heldout),
     )
     problems = [line for section in sections for line in section.lines if line.mark == "problem"]
     return (
@@ -519,6 +526,30 @@ def check_report(
         ),
         ran,
     )
+
+
+def _heldout_sections(heldout: int | None) -> tuple[CheckSection, ...]:
+    """Whether a Benchmark holds out enough Tasks for a proof to decide anything.
+
+    Returns:
+        A ``Held-out`` section with one line, or none for a Benchmark that holds
+        out no Tasks, which isn't used for proofs.
+    """
+    if not heldout:
+        return ()
+    enough = heldout >= MIN_SHARED_TASKS
+    line = CheckLine(
+        mark="ok" if enough else "warning",
+        text=f"{'held-out Tasks':<44} {heldout}",
+        detail=""
+        if enough
+        else (
+            f"A paired verdict needs {MIN_SHARED_TASKS} shared Tasks, so a proof on "
+            f"{_counted(heldout, 'held-out Task')} always reads not enough data. Hold out "
+            f"at least {MIN_SHARED_TASKS}."
+        ),
+    )
+    return (CheckSection(title="Held-out", lines=(line,)),)
 
 
 def _counted(count: int, noun: str) -> str:

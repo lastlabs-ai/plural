@@ -19,10 +19,17 @@ def _on_table(state: dict) -> float | None:
     return state["offers"][-1]["price"]
 
 
+def _fair(state: dict) -> dict[str, float]:
+    if state.get("ended") != "deal":
+        return dict.fromkeys(SEATS, 0.0)
+    price = state["price"]
+    return {"seat_1": float(price <= state["value"]), "seat_2": float(price >= state["cost"])}
+
+
 def measure(step: Step) -> dict[str, dict[str, float]]:
-    """Each seat's surplus at the offer on the table, after every action."""
+    """Each seat's surplus at the offer on the table, and whether its deal is fair."""
     state = step.apps["market"].state.model_dump()
-    return {"surplus_usd": _surplus(state, _on_table(state))}
+    return {"surplus_usd": _surplus(state, _on_table(state)), "fair_deal": _fair(state)}
 
 
 def check(episode: Episode) -> VerifierOutput:

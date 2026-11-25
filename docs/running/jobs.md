@@ -168,6 +168,15 @@ runs there as it would locally, in a folder of the sandbox's own: nothing depend
 your machine's paths. Its Environments must use the `local` Runtime, which then runs
 inside the sandbox.
 
+Detaching needs only a Plural key: no Daytona key or SDK on your machine. The hosted
+project starts the sandbox for one of its Daytona Runtimes (`--runtime` picks one
+when it has several) and relays every command and file. A Runtime on Plural's account
+bills the sandbox to your credits as compute usage; one with its own stored Daytona
+key starts it on that account, where the key stays, and never draws on credits. The
+sandbox lives as long as the Job's Trials need, up to two days, and isn't stopped for
+being idle while the Job runs; once it finishes, the sandbox ends after thirty idle
+minutes if `plural job show` hasn't already ended it.
+
 The sandbox gets a key minted for this Job alone. It calls chat completions and records
 this one Job, its Trials and their executions, and nothing else; it expires within two
 days, and is revoked when the run finishes. The Job appears in the hosted project as it

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-25
+
+### Added
+
+- `plural run --detach` needs only a Plural key. The hosted project starts the sandbox for one of its Daytona Runtimes (`--runtime` picks one), on Plural's account or the Runtime's stored credentials, and relays every command and file; no Daytona key or SDK is needed on the launching machine. `plural job show` syncs a detached Job through the relay.
+- `plural agent revise AGENT --from-fork FORK` ships the exact remedy a winning fork tested. It refuses a fork that didn't beat its controls, one that changed what the Agent saw rather than the Agent, and one that forked another Agent's Trial.
+- A sandbox image with Node.js 22 and the pinned Claude Code and Codex CLIs, `plural-sandbox:py3.11-vendor` and `py3.12-vendor`, so a recorded run keeps its gateway-only network and installs nothing at run time.
+- The Daytona adapter's `upload_from` and `download_to` stream a file through a local path.
+
+### Changed
+
+- An inspection records each fork on the hosted Job it tests, as a Job with purpose `fork` linked by `forked_from_job_id`, so a hosted Finding opens its fork Trials. Recording a fork Job sends every Agent it ran.
+- A fork runs as long as the Trial it forks allows, and the Inspector's time limit and fork key grow to fit. A fork past its deadline is reported as timed out with its spend recorded.
+- `plural benchmark validate` warns when a Benchmark holds out fewer than 10 Tasks. vending-quarter holds out ten seeds.
+- The negotiation example's deal-books 1.1.0 gates each seat on a deal inside its own limit (`fair_deal`), so each seat has its own pass rate.
+- Setup uses a preinstalled `claude` or `codex` only at its pinned version, and otherwise installs the pinned one, printing a line that names both versions.
+- A run warns when `PLURAL_GATEWAY_URL` points at this machine or a private network while the project is bound to a hosted platform, and uses the signed-in platform's gateway instead.
+- A relayed command returns at most the last MiB of each stream, with a note in front of output whose start was cut, and a failure after the command started is raised as an error.
+
+### Fixed
+
+- On Daytona, the user a Harness runs as owns the request folder Plural writes, so a vendor Harness under App host isolation can write its `environment.json`.
+- `DaytonaProvider.close` no longer fails.
+
 ## [0.27.0] - 2026-11-23
 
 ### Added
@@ -974,7 +998,8 @@ command and API and how to move a project.
 - Environments (tasks, tools, scorers), versioned datasets, and benchmark reports.
 - Docs site (MkDocs) and cookbook-style routing examples.
 
-[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/lastlabs-ai/plural/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/lastlabs-ai/plural/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/lastlabs-ai/plural/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/lastlabs-ai/plural/compare/v0.25.1...v0.26.0
 [0.25.1]: https://github.com/lastlabs-ai/plural/compare/v0.25.0...v0.25.1

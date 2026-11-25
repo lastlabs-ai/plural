@@ -808,6 +808,7 @@ class JobsAPI:
         description: str = "",
         evaluation_track: str | None = None,
         opponent_revision_ids: Sequence[str] = (),
+        forked_from_job_id: str | None = None,
     ) -> JsonObject:
         """Record, from pushed revisions, a Job this client runs and reports.
 
@@ -815,7 +816,8 @@ class JobsAPI:
         itself. ``client_job_id`` names the client's own record of it, and
         ``evaluation_track`` the Benchmark evaluation track its results publish on.
         ``opponent_revision_ids`` are a Benchmark's fixed opponents, which follow
-        the ranked Agents in ``spec.agents``.
+        the ranked Agents in ``spec.agents``. ``forked_from_job_id`` is, for a
+        fork Job, the hosted Job whose Trial it continues.
         """
         if len(agent_revision_ids) + len(opponent_revision_ids) != len(spec.agents):
             raise InvalidRequestError("agent_revision_ids must align with Job agents")
@@ -828,6 +830,8 @@ class JobsAPI:
             extra["purpose"] = spec.purpose
         if opponent_revision_ids:
             extra["opponent_revision_ids"] = list(opponent_revision_ids)
+        if forked_from_job_id is not None:
+            extra["forked_from_job_id"] = forked_from_job_id
         revisions = dict(
             zip(
                 (item.agent_id for item in spec.agents),

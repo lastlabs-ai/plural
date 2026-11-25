@@ -690,6 +690,16 @@ def submit_client_job(
         if (record.agent.startswith(f"{AGENT.name}/"))
         else None
     )
+    if spec.fork is not None:
+        return _submit_fork(
+            workspace,
+            studio,
+            spec,
+            source=source,
+            resolved=resolved,
+            idempotency_key=idempotency_key or f"local:{record.job_id}",
+            client_job_id=record.job_id,
+        )
     harness_ref = (
         next((ref for ref in resolved if ref.kind == HARNESS.name), None)
         if agent_ref is None
@@ -707,6 +717,74 @@ def submit_client_job(
         client_job_id=record.job_id,
         evaluation_track=record.evaluation_track,
     )
+
+
+def _submit_fork(
+    workspace: Workspace,
+    studio: Studio,
+    spec: JobSpec,
+    *,
+    source: ResourceRef,
+    resolved: Mapping[ResourceRef, HostedRevision],
+    idempotency_key: str,
+    client_job_id: str,
+) -> ClientJob:
+    """Create the hosted fork Job, linked to the hosted Job whose Trial it continues.
+
+    The original Agent is the revision the forked Job pinned. A candidate that
+    isn't a pushed revision, such as the Inspector's change to the Agent, is
+    added to its Agent as a revision that doesn't become current.
+
+    Returns:
+        The hosted Job and the hosted Agent each local binding ran as.
+
+    Raises:
+        ProjectError: When the Job it forks was never recorded.
+    """
+    fork = spec.fork
+    assert fork is not None
+    forked = workspace.project.jobs_dir / fork.job_id / RUN_RECORD
+    forked_from = (
+        json.loads(forked.read_text("utf-8")).get("hosted_job_id") if forked.is_file() else None
+    )
+    if not forked_from:
+        raise ProjectError(
+            f"Job {fork.job_id} was never recorded, so its fork can't be. Record it first "
+            f"with plural job record {fork.job_id}."
+        )
+    pinned = {ref.name: value for ref, value in resolved.items() if ref.kind == AGENT.name}
+    control = next(item for item in spec.agents if item.agent_id == fork.control_agent_id)
+    parent = pinned.get(control.name)
+    revision_ids: list[str] = []
+    agents: dict[str, tuple[str, str]] = {}
+    for binding in spec.agents[: len(spec.agents) - len(spec.opponents)]:
+        revision = pinned.get(binding.name)
+        if revision is not None and revision.content_hash == binding.agent.content_hash:
+            revision_ids.append(revision.revision_id)
+            continue
+        pushed = studio.agents.push(
+            _agent_value(workspace, binding.agent),
+            resource_id=parent.resource_id if parent is not None else None,
+            current=False,
+            lineage=(
+                [{"relation": "derived_from", "revision_id": parent.revision_id}]
+                if parent is not None
+                else ()
+            ),
+        )
+        revision_ids.append(str(pushed["id"]))
+        agents[binding.content_hash] = (binding.name, binding.agent.content_hash)
+    _stamp_harness(studio, spec, resolved)
+    record = studio.jobs.submit(
+        spec,
+        source_revision_id=resolved[source].revision_id,
+        agent_revision_ids=revision_ids,
+        idempotency_key=idempotency_key,
+        name=f"Fork of {fork.trial_id} after step {fork.step}",
+        client_job_id=client_job_id,
+        forked_from_job_id=str(forked_from),
+    )
+    return ClientJob(record=record, agents=agents)
 
 
 def push_local_job(workspace: Workspace, studio: Studio, job_id: str) -> PushedJob:

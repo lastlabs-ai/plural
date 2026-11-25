@@ -48,8 +48,8 @@ vending-sim/
   tasks/vend-year/       365 days, with the supplier accounts in the instructions
   tasks/vend-quarter/    the first 90 days, to investigate cheaply
   tasks/vend-quarter-s1/ .. -s3/  the quarter from other weekdays: dev seeds
-  tasks/vend-quarter-h1/ .. -h3/  three more, held out for confirmation
-  benchmarks/vending-quarter/     the seven quarters, ranked on net worth in dollars
+  tasks/vend-quarter-h1/ .. -h10/ ten more, held out for confirmation
+  benchmarks/vending-quarter/     the fourteen quarters, ranked on net worth in dollars
   verifiers/vending-books/  net worth once a day, profit, and two gates
   agents/vending-luna/   a small model with a context policy
   agents/vending-rules/  a Harness that restocks by rule and calls no model
@@ -173,12 +173,13 @@ primary_metric: net_worth_usd
 heldout:
   - vend-quarter-h1
   - vend-quarter-h2
-  - vend-quarter-h3
+  # … through vend-quarter-h10
 ```
 
-Its Tasks are the quarter from seven starting weekdays. Day 1 falls on a different
-weekday in each, so the quiet weekends land elsewhere and the customers come in a
-different order. Run the four dev seeds, once per Agent:
+Its Tasks are the quarter on fourteen seeds. Day 1 falls on a different weekday in the
+first seven, so the quiet weekends land elsewhere and the customers come in a different
+order; the rest also set the machine's `customers`, which draws another run of
+customers on the same weekdays. Run the four dev seeds, once per Agent:
 
 ```bash
 plural run --benchmark vending-quarter -a vending-rules --budget-usd 1 --record
@@ -186,8 +187,9 @@ plural run --benchmark vending-quarter -a vending-luna --budget-usd 4 --record
 ```
 
 The run summary and `plural job report` give net worth in dollars, and the
-Benchmark's leaderboard ranks the two on it, higher first, with the score beside it. The three `-h` seeds are held
-out: a plain run leaves them alone.
+Benchmark's leaderboard ranks the two on it, higher first, with the score beside it. The ten `-h` seeds are held
+out: a plain run leaves them alone. Ten, because a paired verdict needs ten shared
+Tasks; `plural benchmark validate` warns about a Benchmark that holds out fewer.
 
 ## Run the year detached
 

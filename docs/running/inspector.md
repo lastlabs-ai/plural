@@ -112,7 +112,12 @@ with forks off, or at `--depth quick`, the Inspector never records one.
 
 `plural job inspect` saves the Findings beside the Job as `findings.json`, and, for a
 Job you recorded, on the hosted Job, where the **Why it failed** tab shows the
-breakdown and each Finding.
+breakdown and each Finding. Each fork the inspection ran is recorded there too, as a
+Job with purpose `fork` linked to the inspected Job by `forked_from_job_id`, and each
+Finding links to the fork Trials that tested it. A changed Agent a fork ran is saved as
+a revision of the original Agent that doesn't become current. A fork Job that can't be
+recorded, such as one whose Agent uses a project Harness, is noted and skipped; the
+inspection is still saved.
 
 ### Depth and budget
 
@@ -128,10 +133,18 @@ Trials named, `--model` picks the Inspector's model (by default `openai/gpt-5.6-
 small, low-cost model), `--fork-model` limits the models a fork may switch the Agent to
 (repeat it for several; by default any gateway model), and `--json` prints everything.
 
+A fork's Trials run under the forked Trial's own Environment limits, so a fork of a long
+run gets as long as that run. Its deadline is those limits for each wave of four forks,
+plus five minutes, and the Inspector's own time limit grows to fit the forks its depth
+allows. A fork that runs past its deadline can't support a Finding, but what its Trials
+spent still counts: each fork Trial writes its cost to `inspection-forks.jsonl` beside
+the inspected Job as it finishes, and the inspection's cost is totaled from there.
+
 The forks never run with your own key. Each inspection mints a key of its own: it can
 only call models through the gateway, is tagged with the Job it inspects for audit, is
 stored as a hash, is never listed with your keys, and is revoked when the inspection
-ends (or after three hours, if it never does). The gateway can't tell a fork's model
+ends (or, if it never does, once the Inspector's time limit has passed, and within
+twelve hours). The gateway can't tell a fork's model
 call from any other, so those are its limits: scope, expiry, and revocation. It reaches only the process that holds the
 Inspector's App, never the Inspector's model or your Agent's Harness. Minting it needs
 hosted access: sign in and bind the project, or scope your key with `plural auth scope
@@ -203,6 +216,16 @@ remedy can change the instructions, the model, the Harness config, including its
 description in [`tool_overrides`](../project/agents.md#change-what-a-tool-says). The
 comments at the top of `agent.yaml` are kept. `--job` picks the inspected Job when
 several hold an `F1`.
+
+```bash
+plural agent revise quote-bot --from-fork job_beac2b4f0a6151cd9cf2c091
+```
+
+`--from-fork` ships the exact remedy one fork tested, named by its fork Job id (or its
+test id, such as `X1`, with `--job`). The fork must have beaten its controls and changed
+the Agent itself, not what the Agent saw. Every fork an inspection finishes is kept in
+its record, so a winning fork no Finding cites can still be shipped. The changelog entry
+names the fork and its counts.
 
 A remedy changes the Agent for every Task, so the Inspector can't propose one that
 names the Task's own world: an account, a customer, a supplier, an item, or a value

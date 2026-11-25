@@ -254,3 +254,71 @@ def test_a_detached_project_never_names_this_machines_folder(
     assert any(
         "tar xzf project.tgz -C /home/daytona/plural-project" in c for c in provider.commands
     )
+
+
+class _Relay:
+    """The hosted compute API, as the hosted Daytona adapter calls it."""
+
+    def __init__(self, status: str = "running") -> None:
+        self.calls: list[tuple[str, str, Any]] = []
+        self.status = status
+
+    def request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append((method, path, kwargs.get("json")))
+        return {"id": "session-1", "status": self.status, "end_reason": "idle"}
+
+
+async def test_a_detached_sandbox_starts_and_ends_through_the_hosted_project() -> None:
+    from plural.errors import PluralError
+    from plural.sandbox.daytona import DaytonaProvider
+    from plural.sandbox.hosted_daytona import HostedDaytonaAdapter
+    from plural.sandbox.models import SandboxRequirements
+
+    relay = _Relay()
+    adapter = HostedDaytonaAdapter(relay, runtime="box", detached_job_id="hosted-job")  # type: ignore[arg-type]
+    await adapter.create(SandboxRequirements(lifetime_seconds=7200))
+    method, path, body = relay.calls[0]
+    assert (method, path) == ("POST", "/compute/sandboxes")
+    assert body["runtime"] == "box"
+    assert body["detached_job_id"] == "hosted-job"
+    assert body["requirements"]["lifetime_seconds"] == 7200
+
+    provider = DaytonaProvider(adapter=adapter)
+    handle = await provider.attach("session-1")
+    assert handle.sandbox_id == "session-1"
+    await provider.destroy(handle)
+    assert relay.calls[-1][:2] == ("DELETE", "/compute/sandboxes/session-1")
+    await provider.delete_sandbox("session-2")
+    assert relay.calls[-1][:2] == ("DELETE", "/compute/sandboxes/session-2")
+    await provider.close()
+
+    with pytest.raises(PluralError, match="has ended"):
+        await HostedDaytonaAdapter(_Relay("ended"), runtime="box").get("session-1")  # type: ignore[arg-type]
+
+
+def test_a_detached_run_starts_its_sandbox_for_the_projects_daytona_runtime() -> None:
+    from plural.cli.run_commands import _detach_runtime
+    from plural.project.layout import ProjectError
+
+    def studio(*runtimes: tuple[str, str]) -> Any:
+        class Runtimes:
+            def list(self) -> list[dict[str, str]]:
+                return [
+                    {"id": f"id-{slug}", "slug": slug, "provider": kind} for slug, kind in runtimes
+                ]
+
+        class Studio:
+            pass
+
+        value = Studio()
+        value.runtimes = Runtimes()  # type: ignore[attr-defined]
+        return value
+
+    assert _detach_runtime(studio(("box", "daytona"), ("dock", "docker")), None) == "box"
+    assert _detach_runtime(studio(("a", "daytona"), ("b", "daytona")), "id-b") == "b"
+    with pytest.raises(ProjectError, match="pick one with --runtime"):
+        _detach_runtime(studio(("a", "daytona"), ("b", "daytona")), None)
+    with pytest.raises(ProjectError, match="it has none"):
+        _detach_runtime(studio(("dock", "docker")), None)
+    with pytest.raises(ProjectError, match="starts docker sandboxes"):
+        _detach_runtime(studio(("dock", "docker")), "dock")

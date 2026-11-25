@@ -212,6 +212,37 @@ async def test_daytona_harness_request_redirect_matches_custom_workspace() -> No
     assert "/workspace/.plural/request.jsonl" not in command
 
 
+async def test_daytona_gives_the_request_folder_to_the_harness_user() -> None:
+    client = FakeDaytonaClient()
+    client.sandbox.stdout = (
+        '{"protocol":"plural-harness-v1","type":"result","status":"succeeded",'
+        '"outputs":[],"artifacts":[]}\n'
+    )
+    provider = DaytonaProvider(adapter=client, environ={})
+    handle = await provider.create(SandboxRequirements())
+    request = HarnessRunRequest(
+        request_id="agent-user",
+        task={"task_id": "one", "input": "x"},
+        agent={"name": "test", "model": "test/model"},
+        environment={},
+        workspace="/workspace/harness",
+    )
+
+    await HarnessRunner(provider).run(
+        handle,
+        HarnessProtocol(name="test", command=("python", "harness.py")),
+        request,
+        user="agent",
+    )
+
+    commands = [entry[0] for entry in client.sandbox.commands]
+    chown = ("--", "chown", "-R", "agent:", "/workspace/harness/.plural")
+    handed = next(i for i, item in enumerate(commands) if item[-5:] == chown)
+    assert commands[handed][:2] == ("sudo", "-n")
+    assert "-u" not in commands[handed]
+    assert "plural-harness" in commands[handed + 1]
+
+
 async def test_daytona_sends_whole_seconds_and_reports_timeouts() -> None:
     sent: list[dict[str, object]] = []
 
@@ -243,6 +274,27 @@ async def test_daytona_sends_whole_seconds_and_reports_timeouts() -> None:
         result = await provider.exec(handle, ExecRequest(command=("sleep", "5"), timeout_seconds=2))
         assert result.timed_out
         assert result.exit_code == -1
+
+
+async def test_official_sandbox_streams_files_through_local_paths(tmp_path: Path) -> None:
+    calls: list[tuple[str, tuple[object, ...]]] = []
+
+    class FileSystem:
+        async def upload_file(self, *args: object) -> None:
+            calls.append(("upload", args))
+
+        async def download_file(self, *args: object) -> None:
+            calls.append(("download", args))
+
+    official = _OfficialSandbox(type("Value", (), {"fs": FileSystem()})())
+    local = tmp_path / "big.bin"
+    await official.upload_from(local, "/workspace/big.bin")
+    await official.download_to("/workspace/big.bin", local)
+    # A str source or destination is Daytona's streaming form; bytes would be buffered.
+    assert calls == [
+        ("upload", (str(local), "/workspace/big.bin")),
+        ("download", ("/workspace/big.bin", str(local))),
+    ]
 
 
 def test_a_daytona_provider_makes_a_client_for_each_event_loop(

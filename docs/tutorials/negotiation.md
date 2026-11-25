@@ -43,7 +43,7 @@ negotiation/
   environments/vault/    one App two partners share
   tasks/bike-deal/, tasks/camera-deal/   competitive, two players
   tasks/two-keys/        cooperative, two players
-  verifiers/deal-books/  each seat's surplus, after every offer
+  verifiers/deal-books/  each seat's surplus after every offer, and a gate per seat
   agents/negotiator-luna/   the Agent being ranked, on a small model
   agents/steady-haggler/    the fixed opponent, a Harness that calls no model
   benchmarks/negotiation/, benchmarks/teamwork/
@@ -79,15 +79,34 @@ The Verifier's `measure` hook returns a value per seat, after every offer:
 
 ```python
 def measure(step: Step) -> dict[str, dict[str, float]]:
-    """Each seat's surplus at the offer on the table, after every action."""
+    """Each seat's surplus at the offer on the table, and whether its deal is fair."""
     state = step.apps["market"].state.model_dump()
-    return {"surplus_usd": _surplus(state, _on_table(state))}
+    return {"surplus_usd": _surplus(state, _on_table(state)), "fair_deal": _fair(state)}
 ```
 
 `_surplus` gives `{"seat_1": ..., "seat_2": ...}`: the buyer's value less the price, and
 the price less the seller's cost. The Trial page charts one series per seat. Each Agent
 is credited with its own seat's surplus, and `seat_aggregate: sum` makes the episode's
 value both together, what the deal created.
+
+## A gate per seat
+
+Surplus says how well a seat did; the gate says whether it did its job at all. The
+Verifier declares `fair_deal` as a gate measured per seat:
+
+```yaml
+- name: fair_deal
+  kind: running
+  aggregate: final
+  seat_aggregate: min
+  gate: true
+  target: ">= 1"
+```
+
+A seat passes once a deal closes inside its own limit: the buyer at or under its value,
+the seller at or over its cost. A walk-away or running out of offers fails both. Each
+seat is judged on its own, so results show each Agent's pass rate from each seat, and
+`seat_aggregate: min` passes the Trial only when both sides did.
 
 ## Rank against a fixed opponent
 

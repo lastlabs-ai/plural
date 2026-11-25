@@ -158,7 +158,11 @@ This section is for readers who want to know exactly what happens inside the
 Runtime. Setup happens in the fresh Runtime, not on your laptop.
 
 1. Plural installs the pinned tool. On Docker and Daytona it may install system tools
-   as root first. The Harness itself then runs as the Runtime's default user.
+   as root first. The Harness itself then runs as the Runtime's default user. A
+   recorded run in a sandbox can reach only the model gateway, so nothing can be
+   installed there: use an image that already has the tool at its pinned version,
+   such as `ghcr.io/lastlabs-ai/plural-sandbox:py3.12-vendor`, which has Node.js,
+   Claude Code and Codex. A copy at any other version is replaced by the pinned one.
 2. The tool starts from the Environment workspace.
 3. Model authentication comes from `Job(client=...)` or `Job(api_key=...)`. Those
    calls set `PLURAL_API_KEY` and `PLURAL_GATEWAY_URL`, and every model call goes

@@ -8,11 +8,15 @@ checked by editing a copy of the project.
 
 from __future__ import annotations
 
+import importlib.util
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
+from plural.metrics import judge
 from plural.project import Project
 from plural.project.layout import ProjectError
 from plural.project.resources import ResourceRef, Workspace
@@ -114,6 +118,38 @@ def test_a_benchmark_refuses_an_unrankable_party(
     with pytest.raises(ProjectError) as caught:
         Workspace(Project.at(root)).load(ResourceRef("benchmark", "negotiation"))
     assert message in "\n".join(caught.value.problems or [caught.value.message])
+
+
+def _measured(root: Path, state: dict[str, Any]) -> dict[str, dict[str, float]]:
+    spec = importlib.util.spec_from_file_location(
+        "deal_books", root / "verifiers/deal-books/verify.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    market = SimpleNamespace(state=SimpleNamespace(model_dump=lambda: state))
+    return module.measure(SimpleNamespace(apps={"market": market}))
+
+
+@pytest.mark.parametrize(
+    ("ended", "price", "verdicts"),
+    [
+        ("deal", 150.0, {"seat_1": True, "seat_2": True}),
+        ("deal", 260.0, {"seat_1": False, "seat_2": True}),
+        ("deal", 80.0, {"seat_1": True, "seat_2": False}),
+        ("walked", None, {"seat_1": False, "seat_2": False}),
+    ],
+)
+def test_each_seat_is_gated_on_a_deal_inside_its_own_limit(
+    root: Path, ended: str, price: float | None, verdicts: dict[str, bool]
+) -> None:
+    verifier = Workspace(Project.at(root)).load(ResourceRef("verifier", "deal-books")).value
+    specs = verifier.metric_specs
+    gate = next(spec for spec in specs if spec.name == "fair_deal")
+    assert gate.gate and gate.seat_aggregate == "min"
+    state = {"value": 200.0, "cost": 100.0, "price": price, "ended": ended, "offers": []}
+    fair = _measured(root, state)["fair_deal"]
+    assert {seat: judge(specs, {"fair_deal": fair[seat]}).passed for seat in fair} == verdicts
 
 
 def test_party_size_is_one_name_and_older_task_files_still_load(root: Path) -> None:

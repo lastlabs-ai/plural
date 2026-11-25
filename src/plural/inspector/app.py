@@ -10,8 +10,12 @@ every number in its answers is computed here.
 from __future__ import annotations
 
 import json
+import math
 import os
+import threading
+import time
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, TypeVar, cast
 
@@ -40,6 +44,65 @@ reaches only the App host: never the Inspector's model, and never the user's own
 
 ATTEMPTS = {"quick": 0, "standard": 4, "deep": 6}
 """Forks per side for each depth. A quick inspection runs no forks."""
+
+FORKS_PER_TRIAL = {"quick": 0, "standard": 2, "deep": 3}
+"""How many forks the Inspector's own time limit leaves room for, by depth."""
+
+FORK_LEDGER = "inspection-forks.jsonl"
+"""Beside the inspected Job: each fork Trial's cost, written as it finishes.
+
+An inspection's spend is totaled from it, so a fork that times out, or that is
+still running when the Inspector stops, still counts what its Trials spent.
+"""
+
+FORK_CONCURRENCY = 4
+"""How many forks of one test run at once."""
+
+FORK_GRACE_SECONDS = 300
+"""Added to a fork's deadline for setup and comparing the results."""
+
+DEFAULT_TRIAL_SECONDS = 3600
+"""A forked Trial's time limit when its Environment sets none."""
+
+MAX_WAIT_SECONDS = 300
+"""The longest one fork_result call waits."""
+
+
+def fork_seconds(max_seconds: float | None, attempts: int) -> float:
+    """How long one fork test may run: its Trials' own limit, for each wave of them.
+
+    A fork's Trials run under the forked Trial's Environment limits, horizon
+    included, so the test's deadline follows them rather than a fixed cap.
+
+    Returns:
+        Seconds.
+
+    Examples:
+        >>> fork_seconds(21600, 4)
+        43500.0
+    """
+    waves = math.ceil(2 * attempts / FORK_CONCURRENCY)
+    return float(waves * (max_seconds or DEFAULT_TRIAL_SECONDS) + FORK_GRACE_SECONDS)
+
+
+@dataclass
+class _Running:
+    """A fork test running on its own thread, and what its Trials spent so far."""
+
+    test_id: str
+    trials: int
+    deadline: float
+    estimate_usd: float
+    gates: tuple[str, ...]
+    started: float = field(default_factory=time.monotonic)
+    done: threading.Event = field(default_factory=threading.Event)
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    finished: int = 0
+    spent_usd: float = 0.0
+    test: ForkTest | None = None
+    error: str | None = None
+    settled: bool = False
+
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 
@@ -183,7 +246,7 @@ class InspectorApp(App[InspectorState]):
             "signals": [item.as_dict() for item in run_signals(trial)],
             "context_compactions": trial.compactions,
             "known_patterns": _patterns(self._root),
-            "fork_budget_usd": round(self.state.budget_usd - self.state.spent_usd, 4),
+            "fork_budget_usd": round(self._budget_left(), 4),
             "forks_allowed": ATTEMPTS[self.state.depth] > 0 and bool(os.environ.get(CREDENTIAL)),
             "fork_models": list(self.state.fork_models) or "any",
         }
@@ -323,7 +386,7 @@ class InspectorApp(App[InspectorState]):
 
     # Experiments.
 
-    @_tool(read_only=False, timeout_seconds=1800)
+    @_tool(read_only=False, timeout_seconds=60)
     def fork(
         self,
         step: int,
@@ -343,8 +406,9 @@ class InspectorApp(App[InspectorState]):
         summary_instructions); or change what it sees with a diagnostic change and
         payload. Step 0 starts over.
         gates names the failed gates this cause explains: each side is judged on those
-        alone, so a fix for one of two failures shows its effect. Returns how often each
-        side passed and the verdict. Costs money.
+        alone, so a fix for one of two failures shows its effect. It starts the fork and
+        returns its test id; fork_result reports how often each side passed and the
+        verdict. Costs money.
         """
         attempts = ATTEMPTS[self.state.depth]
         if attempts == 0:
@@ -382,36 +446,163 @@ class InspectorApp(App[InspectorState]):
                 f"{', '.join(unknown)} didn't fail. The failed gates: {sorted(failed) or 'none'}."
             )
         estimate = 2 * attempts * float(trial.overview()["cost_usd"] or 0.0)
-        left = self.state.budget_usd - self.state.spent_usd
+        left = self._budget_left()
         if estimate > left:
             raise ValueError(
                 f"This fork would cost about ${estimate:.4f}, and ${left:.4f} of the budget "
                 "is left. Record what you have."
             )
+        test_id = f"X{len(set(self._running()) | {t['test_id'] for t in self.state.tests}) + 1}"
+        running = _Running(
+            test_id=test_id,
+            trials=2 * attempts,
+            deadline=fork_seconds(trial.task.environment.limits.max_seconds, attempts),
+            estimate_usd=estimate,
+            gates=tuple(sorted(set(gates or ()))),
+        )
+        self._running()[test_id] = running
+        threading.Thread(
+            target=self._run_fork,
+            name=f"fork-{test_id}",
+            args=(running,),
+            kwargs={
+                "step": step,
+                "remedy": None if remedy.empty else remedy,
+                "change": change,
+                "payload": payload,
+                "attempts": attempts,
+            },
+            daemon=True,
+        ).start()
+        return {
+            "test_id": test_id,
+            "status": "running",
+            "trials": running.trials,
+            "deadline_seconds": round(running.deadline),
+            "next": f"Call fork_result('{test_id}') to wait for its verdict. You can read "
+            "other evidence or start another fork meanwhile.",
+        }
+
+    @_tool(read_only=False, timeout_seconds=MAX_WAIT_SECONDS + 60)
+    def fork_result(self, test_id: str, wait_seconds: int = 120) -> dict[str, Any]:
+        """Wait up to wait_seconds (at most 300) for a fork you started, then report it:
+        its verdict and how often each side passed once it's done, or how many of its
+        Trials have finished and what they spent while it runs. A fork past its deadline
+        stops counting toward a Finding; what its Trials spent is still recorded.
+        """
+        running = self._running().get(test_id)
+        if running is None:
+            raise ValueError(f"No fork {test_id} was started. Started: {sorted(self._running())}.")
+        running.done.wait(timeout=min(max(wait_seconds, 0), MAX_WAIT_SECONDS))
+        if running.done.is_set():
+            return self._settle(running)
+        elapsed = time.monotonic() - running.started
+        with running.lock:
+            finished, spent = running.finished, running.spent_usd
+        if elapsed < running.deadline:
+            return {
+                "test_id": test_id,
+                "status": "running",
+                "finished_trials": finished,
+                "trials": running.trials,
+                "spent_usd": round(spent, 6),
+                "seconds_left": round(running.deadline - elapsed),
+            }
+        if not running.settled:
+            running.settled = True
+            self.state.spent_usd += spent
+        return {
+            "test_id": test_id,
+            "status": "timed_out",
+            "finished_trials": finished,
+            "trials": running.trials,
+            "spent_usd": round(spent, 6),
+            "next": "It ran past its deadline, so it can't support a Finding. Record what "
+            "you have, or fork again with less to run.",
+            "fork_budget_left_usd": round(self._budget_left(), 4),
+        }
+
+    def close(self) -> None:
+        """Let unfinished forks finish, up to their deadlines, so their spend is counted."""
+        for running in self._running().values():
+            left = running.deadline - (time.monotonic() - running.started)
+            if left > 0:
+                running.done.wait(timeout=left)
+
+    def _running(self) -> dict[str, _Running]:
+        forks: dict[str, _Running] | None = getattr(self, "_forks", None)
+        if forks is None:
+            forks = {}
+            self._forks = forks
+        return forks
+
+    def _budget_left(self) -> float:
+        pending = sum(item.estimate_usd for item in self._running().values() if not item.settled)
+        return self.state.budget_usd - self.state.spent_usd - pending
+
+    def _run_fork(self, running: _Running, **request: Any) -> None:
         from plural.inspector.experiments import run_fork
 
-        test = run_fork(
-            self._root,
-            trial_id=self.state.trial_id,
-            step=step,
-            remedy=None if remedy.empty else remedy,
-            change=change,
-            payload=payload,
-            attempts=attempts,
-            test_id=f"X{len(self.state.tests) + 1}",
-            environ=_fork_environ(self.state.gateway_url, self.state.api_url),
-            gates=sorted(set(gates or ())),
-        )
-        self.state.tests.append(test.model_dump(mode="json"))
-        self.state.spent_usd += test.cost_usd
+        ledger = self._job.directory / FORK_LEDGER
+
+        def finished(_spec: Any, result: Any) -> None:
+            cost = float((result.metrics or {}).get("cost_usd") or 0.0)
+            with running.lock:
+                running.finished += 1
+                running.spent_usd += cost
+                with ledger.open("a", encoding="utf-8") as handle:
+                    handle.write(
+                        json.dumps(
+                            {
+                                "test_id": running.test_id,
+                                "trial_id": result.trial_id,
+                                "cost_usd": cost,
+                            }
+                        )
+                        + "\n"
+                    )
+
+        try:
+            test = run_fork(
+                self._root,
+                trial_id=self.state.trial_id,
+                test_id=running.test_id,
+                environ=_fork_environ(self.state.gateway_url, self.state.api_url),
+                gates=running.gates,
+                progress=finished,
+                **request,
+            )
+            running.test = test.model_copy(update={"trial_id": self.state.trial_id})
+        except Exception as exc:  # reported by fork_result
+            running.error = str(exc) or type(exc).__name__
+        finally:
+            running.done.set()
+
+    def _settle(self, running: _Running) -> dict[str, Any]:
+        """A finished fork's result, recorded in the State once."""
+        test = running.test
+        if test is None:
+            if not running.settled:
+                running.settled = True
+                self.state.spent_usd += running.spent_usd
+            return {
+                "test_id": running.test_id,
+                "status": "failed",
+                "error": running.error,
+                "spent_usd": round(running.spent_usd, 6),
+            }
+        if not running.settled:
+            running.settled = True
+            self.state.tests.append(test.model_dump(mode="json"))
+            self.state.spent_usd += test.cost_usd
+        failed = set(self._trial().row()["failed_gates"])
         candidates = test.outcomes.get("candidate", {})
         newly = sorted(
-            name
-            for name in candidates
-            if name != "passed" and name not in failed | set(gates or ())
+            name for name in candidates if name != "passed" and name not in failed | set(test.gates)
         )
         return {
             **test.model_dump(mode="json", exclude={"remedy", "payload"}),
+            "status": "done",
             "beat_controls": test.beat_controls,
             "newly_failed": {name: candidates[name] for name in newly},
             "next": (
@@ -421,7 +612,7 @@ class InspectorApp(App[InspectorState]):
                 if newly
                 else ""
             ),
-            "fork_budget_left_usd": round(self.state.budget_usd - self.state.spent_usd, 4),
+            "fork_budget_left_usd": round(self._budget_left(), 4),
         }
 
     # Output.
@@ -612,4 +803,12 @@ def render(value: Any) -> str:
     return json.dumps(value, sort_keys=True, default=str)
 
 
-__all__ = ["ATTEMPTS", "PATTERNS_FILE", "InspectorApp", "InspectorState", "render"]
+__all__ = [
+    "ATTEMPTS",
+    "FORK_LEDGER",
+    "PATTERNS_FILE",
+    "InspectorApp",
+    "InspectorState",
+    "fork_seconds",
+    "render",
+]

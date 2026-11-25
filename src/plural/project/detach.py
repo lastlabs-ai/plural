@@ -1,7 +1,10 @@
 """Run a Job's runner in a Runtime sandbox, so a long run doesn't depend on this machine.
 
 ``plural run --detach`` packages the project, uploads it with this Plural to a
-sandbox, starts ``plural run`` there, and returns. The sandbox unpacks the
+sandbox the hosted project starts for one of its Daytona Runtimes, starts
+``plural run`` there, and returns. Only a Plural key is needed: the sandbox
+runs on Plural's account or the Runtime's stored credentials, which never
+leave the server, and every command and file goes through the hosted API. The sandbox unpacks the
 project into its own folder and never depends on this machine's paths or folder
 layout. The Job keeps its id: this machine plans it with a run id the sandbox
 reuses, and a Job's identity names its sources by content, not by path. The
@@ -18,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import io
-import ipaddress
 import json
 import shlex
 import subprocess
@@ -30,9 +32,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import plural
+from plural.config import is_local_url
 from plural.project.layout import BINDING_FILE, ProjectError
 from plural.project.resources import Workspace
 from plural.project.runs import RunPlan, planned_job_id
@@ -61,7 +63,6 @@ _LAUNCH = (
 )
 _ALIVE = "{{ kill -0 {pid} 2>/dev/null && echo alive || echo done; }}"
 _PACK = "cd {project}/.plural/jobs && tar czf {remote}/sync.tgz {job}"
-_LOCAL_NAMES = {"localhost", "host.docker.internal", "gateway.docker.internal"}
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,8 @@ class Detached:
     key_expires_at: str | None = None
     synced_at: str | None = None
     finished: bool = False
+    runtime: str | None = None
+    """The project Runtime the hosted project started the sandbox for."""
 
     def to_json(self) -> dict[str, Any]:
         """The record as written to ``detached.json``.
@@ -93,14 +96,7 @@ def refuse_unreachable(url: str) -> None:
     Raises:
         ProjectError: When the URL names this machine or a private network.
     """
-    host = (urlsplit(url).hostname or "").lower()
-    private = host in _LOCAL_NAMES or host.endswith((".local", ".internal", ".localhost"))
-    try:
-        address = ipaddress.ip_address(host)
-        private = private or not address.is_global
-    except ValueError:
-        pass
-    if private or not host:
+    if is_local_url(url):
         raise ProjectError(
             f"A detached run's sandbox can't reach {url}: it is this machine or its "
             "network, and Plural never tunnels to it. Detach against a hosted Plural, "
@@ -267,6 +263,7 @@ async def launch(
     key_expires_at: str | None = None,
     wait_seconds: float = 180,
     extra: Mapping[str, bytes] | None = None,
+    runtime: str | None = None,
 ) -> Detached:
     """Start the Job in a new sandbox and record where it runs.
 
@@ -347,6 +344,7 @@ async def launch(
         project=folder,
         started_at=_now(),
         key_expires_at=key_expires_at,
+        runtime=runtime,
     )
     _write(workspace, record)
     return record

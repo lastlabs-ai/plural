@@ -1,10 +1,13 @@
-"""Daytona sandboxes on Plural's own Daytona account.
+"""Daytona sandboxes Plural starts for a project Runtime.
 
 A project Runtime set to use Plural's credentials never hands its key to the
-client. Plural starts each sandbox and relays every command and file through
-the hosted API, then bills the sandbox's lifetime to the account's credits as
-compute usage. :class:`HostedDaytonaAdapter` is the client side of that relay
-and slots into :class:`~plural.sandbox.daytona.DaytonaProvider` unchanged.
+client, and neither does one with its own stored credentials when a run goes
+through the relay, as a detached run does. Plural starts each sandbox and
+relays every command and file through the hosted API. On Plural's account the
+sandbox's lifetime is billed to the account's credits as compute usage; on the
+Runtime's own credentials it never draws on credits.
+:class:`HostedDaytonaAdapter` is the client side of that relay and slots into
+:class:`~plural.sandbox.daytona.DaytonaProvider` unchanged.
 """
 
 from __future__ import annotations
@@ -85,13 +88,22 @@ class _HostedSandbox:
             },
             timeout=(timeout or DEFAULT_EXEC_TIMEOUT_SECONDS) + EXEC_GRACE_SECONDS,
         )
+        if result.get("error"):
+            raise PluralError(str(result["error"]))
         if result.get("timed_out"):
             raise TimeoutError(f"command timed out after {timeout} seconds")
         return (
             int(result.get("exit_code", 0)),
-            str(result.get("stdout") or ""),
-            str(result.get("stderr") or ""),
+            _marked(str(result.get("stdout") or ""), result.get("stdout_cut_bytes")),
+            _marked(str(result.get("stderr") or ""), result.get("stderr_cut_bytes")),
         )
+
+
+def _marked(text: str, cut: Any) -> str:
+    """``text`` with a note in front when the relay kept only its end."""
+    if not cut:
+        return text
+    return f"[{int(cut)} earlier bytes not relayed]\n{text}"
 
 
 class HostedDaytonaAdapter:
@@ -101,11 +113,15 @@ class HostedDaytonaAdapter:
         studio: Hosted API client for the Runtime's project.
         runtime: The project Runtime's slug or id. Its settings, not the
             client's, decide the region, and its account pays.
+        detached_job_id: The recorded Job a detached run's sandbox runs. The
+            sandbox lives as long as the run asks, and isn't ended for being
+            idle while that Job runs.
     """
 
-    def __init__(self, studio: Studio, *, runtime: str) -> None:
+    def __init__(self, studio: Studio, *, runtime: str, detached_job_id: str | None = None) -> None:
         self._studio = studio
         self._runtime = runtime
+        self._detached_job_id = detached_job_id
 
     async def create(self, requirements: SandboxRequirements) -> DaytonaSandboxAdapter:
         """Start a sandbox, waiting while the account has no credits for one."""
@@ -120,6 +136,11 @@ class HostedDaytonaAdapter:
                     json={
                         "runtime": self._runtime,
                         "requirements": requirements.model_dump(mode="json"),
+                        **(
+                            {"detached_job_id": self._detached_job_id}
+                            if self._detached_job_id
+                            else {}
+                        ),
                     },
                     timeout=CREATE_TIMEOUT_SECONDS,
                 )
@@ -134,9 +155,32 @@ class HostedDaytonaAdapter:
                 waited += wait
         return cast("DaytonaSandboxAdapter", _HostedSandbox(self._studio, record))
 
+    async def get(self, sandbox_id: str) -> DaytonaSandboxAdapter:
+        """Reach a sandbox this project started, such as a detached run's.
+
+        Raises:
+            PluralError: When it has ended.
+        """
+        record = await asyncio.to_thread(
+            self._studio.request, "GET", f"/compute/sandboxes/{quote(sandbox_id)}"
+        )
+        if record.get("status") != "running":
+            reason = record.get("end_reason") or record.get("status")
+            raise PluralError(f"Sandbox {sandbox_id} has ended ({reason}).")
+        return cast("DaytonaSandboxAdapter", _HostedSandbox(self._studio, record))
+
     async def delete(self, sandbox: DaytonaSandboxAdapter) -> None:
         hosted = cast(_HostedSandbox, sandbox)
         await asyncio.to_thread(self._studio.request, "DELETE", hosted.path)
+
+    async def delete_by_id(self, sandbox_id: str) -> None:
+        """End a sandbox this project started, by id."""
+        await asyncio.to_thread(
+            self._studio.request, "DELETE", f"/compute/sandboxes/{quote(sandbox_id)}"
+        )
+
+    async def close(self) -> None:
+        """Nothing to close: every call is a request to the hosted API."""
 
 
 __all__ = ["HostedDaytonaAdapter"]

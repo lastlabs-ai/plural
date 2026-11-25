@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -42,7 +43,14 @@ def main(argv: list[str] | None = None) -> None:
         prefix.mkdir(parents=True, exist_ok=True)
     binary = BINARIES[name]
     if _on_path(binary):
-        return
+        found = _version_on_path(binary)
+        if found is not None and _is_version(found, version):
+            return
+        print(
+            f"Replacing {binary} {_release(found) or 'of unknown version'} on PATH "
+            f"with the pinned {version}.",
+            file=sys.stderr,
+        )
     try:
         if name in NPM_PACKAGES:
             _install_npm(NPM_PACKAGES[name], version, provider, prefix)
@@ -67,6 +75,31 @@ def _on_path(binary: str, extra: Path | None = None) -> bool:
     if extra is not None:
         os.environ["PATH"] = f"{extra}{os.pathsep}{path}"
     return shutil.which(binary) is not None
+
+
+def _version_on_path(binary: str) -> str | None:
+    """What the CLI on PATH prints for ``--version``, or None when it can't say."""
+    path = shutil.which(binary)
+    if path is None:
+        return None
+    try:
+        completed = subprocess.run(
+            (path, "--version"), check=False, capture_output=True, timeout=30
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return (completed.stdout + completed.stderr).decode("utf-8", errors="replace")
+
+
+def _is_version(output: str, version: str) -> bool:
+    """Whether ``--version`` output names exactly ``version``."""
+    return re.search(rf"(?<![0-9.]){re.escape(version)}(?![0-9])", output) is not None
+
+
+def _release(output: str | None) -> str | None:
+    """The release number in ``--version`` output."""
+    match = re.search(r"[0-9]+(\.[0-9]+)+\S*", output or "")
+    return match.group(0) if match else None
 
 
 def _install_npm(package: str, version: str, provider: str, prefix: Path) -> None:
