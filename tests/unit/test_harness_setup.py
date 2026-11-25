@@ -145,9 +145,20 @@ async def test_setup_failure_is_clear() -> None:
         )
 
 
-def test_local_installer_skips_when_binary_exists(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_local_installer_skips_when_binary_exists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    hermes = tmp_path / "hermes"
+    hermes.write_text("#!/bin/sh\necho 'Hermes Agent v0.19.0'\n")
+    hermes.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.setenv("PLURAL_RUNTIME_PROVIDER", "local")
-    monkeypatch.setattr("plural.harness.install.shutil.which", lambda _name: "/usr/bin/hermes")
+    monkeypatch.setenv("PLURAL_TOOLS_PREFIX", str(tmp_path / "tools"))
+
+    def refuse(*args: object) -> None:
+        raise AssertionError(f"installed {args[0]}")
+
+    monkeypatch.setattr("plural.harness.install._install_pip", refuse)
     install_main(["hermes", "0.19.0"])
 
 
