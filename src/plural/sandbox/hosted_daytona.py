@@ -88,13 +88,22 @@ class _HostedSandbox:
             },
             timeout=(timeout or DEFAULT_EXEC_TIMEOUT_SECONDS) + EXEC_GRACE_SECONDS,
         )
+        if result.get("error"):
+            raise PluralError(str(result["error"]))
         if result.get("timed_out"):
             raise TimeoutError(f"command timed out after {timeout} seconds")
         return (
             int(result.get("exit_code", 0)),
-            str(result.get("stdout") or ""),
-            str(result.get("stderr") or ""),
+            _marked(str(result.get("stdout") or ""), result.get("stdout_cut_bytes")),
+            _marked(str(result.get("stderr") or ""), result.get("stderr_cut_bytes")),
         )
+
+
+def _marked(text: str, cut: Any) -> str:
+    """``text`` with a note in front when the relay kept only its end."""
+    if not cut:
+        return text
+    return f"[{int(cut)} earlier bytes not relayed]\n{text}"
 
 
 class HostedDaytonaAdapter:
