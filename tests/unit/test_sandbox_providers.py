@@ -212,6 +212,37 @@ async def test_daytona_harness_request_redirect_matches_custom_workspace() -> No
     assert "/workspace/.plural/request.jsonl" not in command
 
 
+async def test_daytona_gives_the_request_folder_to_the_harness_user() -> None:
+    client = FakeDaytonaClient()
+    client.sandbox.stdout = (
+        '{"protocol":"plural-harness-v1","type":"result","status":"succeeded",'
+        '"outputs":[],"artifacts":[]}\n'
+    )
+    provider = DaytonaProvider(adapter=client, environ={})
+    handle = await provider.create(SandboxRequirements())
+    request = HarnessRunRequest(
+        request_id="agent-user",
+        task={"task_id": "one", "input": "x"},
+        agent={"name": "test", "model": "test/model"},
+        environment={},
+        workspace="/workspace/harness",
+    )
+
+    await HarnessRunner(provider).run(
+        handle,
+        HarnessProtocol(name="test", command=("python", "harness.py")),
+        request,
+        user="agent",
+    )
+
+    commands = [entry[0] for entry in client.sandbox.commands]
+    chown = ("--", "chown", "-R", "agent:", "/workspace/harness/.plural")
+    handed = next(i for i, item in enumerate(commands) if item[-5:] == chown)
+    assert commands[handed][:2] == ("sudo", "-n")
+    assert "-u" not in commands[handed]
+    assert "plural-harness" in commands[handed + 1]
+
+
 async def test_daytona_sends_whole_seconds_and_reports_timeouts() -> None:
     sent: list[dict[str, object]] = []
 

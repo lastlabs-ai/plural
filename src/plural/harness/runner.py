@@ -131,6 +131,29 @@ class HarnessRunner:
                     stderr=result.stderr,
                 )
 
+    async def _hand_over(self, handle: SandboxHandle, folder: str, user: str) -> None:
+        """Give ``user`` the folder Plural just wrote, so its Harness can add files there.
+
+        Uploads run as the sandbox's own user, so the folder they create would
+        otherwise belong to it and not to the Harness's user.
+        """
+        result = await self.provider.exec(
+            handle,
+            ExecRequest(
+                command=("chown", "-R", f"{user}:", folder),
+                cwd="/",
+                timeout_seconds=60,
+                user="root",
+            ),
+        )
+        if result.exit_code != 0:
+            detail = (result.stderr or result.stdout).decode("utf-8", errors="replace")
+            raise HarnessExecutionError(
+                f"could not give {folder} to the Harness's user {user}: {detail[:500]}",
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+
     async def run(
         self,
         handle: SandboxHandle,
@@ -194,6 +217,8 @@ class HarnessRunner:
                 (FileUpload(path=request_path, data=request_payload),),
                 root=workspace,
             )
+            if user is not None:
+                await self._hand_over(handle, f"{workspace.rstrip('/')}/.plural", user)
             command = (
                 "sh",
                 "-c",
