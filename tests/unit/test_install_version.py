@@ -16,7 +16,7 @@ def _cli(folder: Path, name: str, prints: str) -> None:
 def test_a_preinstalled_cli_counts_only_at_the_pinned_version(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("PATH", str(tmp_path))
     _cli(tmp_path, "claude", "2.1.236 (Claude Code)")
     _cli(tmp_path, "codex", "codex-cli 0.153.2")
 
