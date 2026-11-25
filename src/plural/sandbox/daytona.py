@@ -13,6 +13,7 @@ import shlex
 import time
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Protocol, cast
 from uuid import uuid4
 
@@ -191,6 +192,14 @@ class _OfficialSandbox:
     async def download_file(self, path: str) -> bytes:
         result = await self.value.fs.download_file(path)
         return bytes(result)
+
+    async def upload_from(self, local: Path, path: str) -> None:
+        """Upload the local file ``local`` to ``path``, streaming it from disk."""
+        await self.value.fs.upload_file(str(local), path)
+
+    async def download_to(self, path: str, local: Path) -> None:
+        """Download ``path`` into the local file ``local``, streaming it to disk."""
+        await self.value.fs.download_file(path, str(local))
 
     async def exec(
         self,

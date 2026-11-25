@@ -276,6 +276,27 @@ async def test_daytona_sends_whole_seconds_and_reports_timeouts() -> None:
         assert result.exit_code == -1
 
 
+async def test_official_sandbox_streams_files_through_local_paths(tmp_path: Path) -> None:
+    calls: list[tuple[str, tuple[object, ...]]] = []
+
+    class FileSystem:
+        async def upload_file(self, *args: object) -> None:
+            calls.append(("upload", args))
+
+        async def download_file(self, *args: object) -> None:
+            calls.append(("download", args))
+
+    official = _OfficialSandbox(type("Value", (), {"fs": FileSystem()})())
+    local = tmp_path / "big.bin"
+    await official.upload_from(local, "/workspace/big.bin")
+    await official.download_to("/workspace/big.bin", local)
+    # A str source or destination is Daytona's streaming form; bytes would be buffered.
+    assert calls == [
+        ("upload", (str(local), "/workspace/big.bin")),
+        ("download", ("/workspace/big.bin", str(local))),
+    ]
+
+
 def test_a_daytona_provider_makes_a_client_for_each_event_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
